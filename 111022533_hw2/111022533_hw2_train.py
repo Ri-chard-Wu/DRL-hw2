@@ -14,7 +14,7 @@ import os
 
 env = gym_super_mario_bros.make('SuperMarioBros-v0')
 env = JoypadSpace(env, COMPLEX_MOVEMENT)
-print(f'COMPLEX_MOVEMENT: {COMPLEX_MOVEMENT}')
+# print(f'COMPLEX_MOVEMENT: {len(COMPLEX_MOVEMENT)}')
 
 # # actions for more complex movement
 # COMPLEX_MOVEMENT = [
@@ -46,297 +46,425 @@ done = True
 for step in range(5000):
     if done:
         state = env.reset()
-    # print(f'################env.action_space.sample(): {env.action_space.sample()}')
     state, reward, done, info = env.step(env.action_space.sample())
-    print(f'state.shape: {state.shape}, reward: {reward}, info: {info}')
-    # env.step(env.action_space.sample())
-    # print(f'#################: {_}')
+  
     # env.render()
-    break
+   
 
 env.close()
 
 
 
 
-# # Define Input Size
-# IMG_WIDTH = 84
-# IMG_HEIGHT = 84
-# NUM_STACK = 4
-# # For Epsilon-greedy
-# MIN_EXPLORING_RATE = 0.01
-# class Agent:
-#     def __init__(self, name, num_action, discount_factor=0.99):
-#         self.exploring_rate = 0.1
-#         self.discount_factor = discount_factor
-#         self.num_action = num_action
-#         self.model = self.build_model(name)
-
-#     def build_model(self, name):
-#         # input: state
-#         # output: each action's Q-value
-#         screen_stack = tf.keras.Input(shape=[IMG_WIDTH, IMG_HEIGHT, NUM_STACK], dtype=tf.float32)
-
-#         x = tf.keras.layers.Conv2D(filters=32, kernel_size=8, strides=4)(screen_stack)
-#         x = tf.keras.layers.ReLU()(x)
-#         x = tf.keras.layers.Conv2D(filters=64, kernel_size=4, strides=2)(x)
-#         x = tf.keras.layers.ReLU()(x)
-#         x = tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=1)(x)
-#         x = tf.keras.layers.ReLU()(x)
-#         x = tf.keras.layers.Flatten()(x)
-#         x = tf.keras.layers.Dense(units=512)(x)
-#         x = tf.keras.layers.ReLU()(x)
-#         Q = tf.keras.layers.Dense(self.num_action)(x)
-
-#         model = tf.keras.Model(name=name, inputs=screen_stack, outputs=Q)
-
-#         return model
-
-#     def loss(self, state, action, reward, tar_Q, ternimal):
-#         # Q(s,a,theta) for all a, shape (batch_size, num_action)
-#         output = self.model(state)
-#         index = tf.stack([tf.range(tf.shape(action)[0]), action], axis=1)
-#         # Q(s,a,theta) for selected a, shape (batch_size, 1)
-#         Q = tf.gather_nd(output, index)
-
-#         # set tar_Q as 0 if reaching terminal state
-#         tar_Q *= ~np.array(terminal)
-
-#         # loss = E[r+max(Q(s',a',theta'))-Q(s,a,theta)]
-#         loss = tf.reduce_mean(tf.square(reward + self.discount_factor * tar_Q - Q))
-
-#         return loss
-
-#     def max_Q(self, state):
-#         # Q(s,a,theta) for all a, shape (batch_size, num_action)
-#         output = self.model(state)
-
-#         # max(Q(s',a',theta')), shape (batch_size, 1)
-#         return tf.reduce_max(output, axis=1)
-
-#     def select_action(self, state):
-#         # epsilon-greedy
-#         if np.random.rand() < self.exploring_rate:
-#             action = np.random.choice(self.num_action)  # Select a random action
-#         else:
-#             state = np.expand_dims(state, axis = 0)
-#             # Q(s,a,theta) for all a, shape (batch_size, num_action)
-#             output = self.model(state)
-
-#             # select action with highest action-value
-#             action = tf.argmax(output, axis=1)[0]
-
-#         return action
-
-#     def update_parameters(self, episode):
-#         self.exploring_rate = max(MIN_EXPLORING_RATE, min(0.5, 0.99**((episode) / 30)))
-
-#     def shutdown_explore(self):
-#         # make action selection greedy
-#         self.exploring_rate = 0
-
-
-# # init agent
-# num_action = len(env.getActionSet())
-
-# # agent for frequently updating
-# online_agent = Agent('online', num_action)
-
-# # agent for slow updating
-# target_agent = Agent('target', num_action)
-# # synchronize target model's weight with online model's weight
-# target_agent.model.set_weights(online_agent.model.get_weights())
-# optimizer = tf.keras.optimizers.Adam(learning_rate=1e-5)
-# average_loss = tf.keras.metrics.Mean(name='loss')
-
-# @tf.function
-# def train_step(state, action, reward, next_state, ternimal):
-#     # Delayed Target Network
-#     tar_Q = target_agent.max_Q(next_state)
-#     with tf.GradientTape() as tape:
-#         loss = online_agent.loss(state, action, reward, tar_Q, ternimal)
-#     gradients = tape.gradient(loss, online_agent.model.trainable_variables)
-#     optimizer.apply_gradients(zip(gradients, online_agent.model.trainable_variables))
-
-#     average_loss.update_state(loss)
-# class Replay_buffer():
-#     def __init__(self, buffer_size=50000):
-#         self.experiences = []
-#         self.buffer_size = buffer_size
-
-#     def add(self, experience):
-#         if len(self.experiences) >= self.buffer_size:
-#             self.experiences.pop(0)
-#         self.experiences.append(experience)
-
-#     def sample(self, size):
-#         """
-#         sample experience from buffer
-#         """
-#         if size > len(self.experiences):
-#             experiences_idx = np.random.choice(len(self.experiences), size=size)
-#         else:
-#             experiences_idx = np.random.choice(len(self.experiences), size=size, replace=False)
-
-#         # from all sampled experiences, extract a tuple of (s,a,r,s')
-#         states = []
-#         actions = []
-#         rewards = []
-#         states_prime = []
-#         terminal = []
-#         for i in range(size):
-#             states.append(self.experiences[experiences_idx[i]][0])
-#             actions.append(self.experiences[experiences_idx[i]][1])
-#             rewards.append(self.experiences[experiences_idx[i]][2])
-#             states_prime.append(self.experiences[experiences_idx[i]][3])
-#             terminal.append(self.experiences[experiences_idx[i]][4])
-
-#         return states, actions, rewards, states_prime, terminal
-# # init buffer
-# buffer = Replay_buffer()
-# import moviepy.editor as mpy
-
-# def make_anim(images, fps=60, true_image=False):
-#     duration = len(images) / fps
-
-#     def make_frame(t):
-#         try:
-#             x = images[int(len(images) / duration * t)]
-#         except:
-#             x = images[-1]
-
-#         if true_image:
-#             return x.astype(np.uint8)
-#         else:
-#             return ((x + 1) / 2 * 255).astype(np.uint8)
-
-#     clip = mpy.VideoClip(make_frame, duration=duration)
-#     clip.fps = fps
-#     return clip
-# import skimage.transform
-
-# def preprocess_screen(screen):
-#     screen = skimage.transform.resize(screen, [IMG_WIDTH, IMG_HEIGHT, 1])
-#     return screen
-
-# def frames_to_state(input_frames):
-#     if(len(input_frames) == 1):
-#         state = np.concatenate(input_frames*4, axis=-1)
-#     elif(len(input_frames) == 2):
-#         state = np.concatenate(input_frames[0:1]*2 + input_frames[1:]*2, axis=-1)
-#     elif(len(input_frames) == 3):
-#         state = np.concatenate(input_frames + input_frames[2:], axis=-1)
-#     else:
-#         state = np.concatenate(input_frames[-4:], axis=-1)
-
-#     return state
-# from IPython.display import Image, display
-
-# update_every_iteration = 1000
-# print_every_episode = 500
-# save_video_every_episode = 5000
-# NUM_EPISODE = 20000
-# NUM_EXPLORE = 20
-# BATCH_SIZE = 32
+ 
 
-# iter_num = 0
-# for episode in range(0, NUM_EPISODE + 1):
+para = AttrDict({
+    'action_num': len(COMPLEX_MOVEMENT), 
+    'img_shape': (240, 256, 3),
+    'img_stack_num': 4,
+    
+    'iter_num': 20000,
+    'episode_num': 10, 
+    'batch_size': 32
 
-#     # Reset the environment
-#     env.reset_game()
+    'min_exploring_rate': 0.01,
 
-#     # record frame
-#     if episode % save_video_every_episode == 0:
-#         frames = [env.getScreenRGB()]
+    'discount_factor': 0.99,
+    'exploring_rate': 0.1
+})
 
-#     # input frame
-#     input_frames = [preprocess_screen(env.getScreenGrayscale())]
+# print(f'list(para.img_shape): {list(para.img_shape)}')
+class Agent:
 
-#     # for every 500 episodes, shutdown exploration to see the performance of greedy action
-#     if episode % print_every_episode == 0:
-#         online_agent.shutdown_explore()
+    def __init__(self, name, para):  
+        self.model = Agent.build_model(name)
+        self.para = deepcopy(para)
+        
 
-#     # cumulate reward for this episode
-#     cum_reward = 0
+    @staticmethod
+    def build_model(name):
+        # input: state
+        # output: each action's Q-value
+        screen_stack = tf.keras.Input(shape=[para.img_shape[1], para.img_shape[0], 
+                                                        para.img_stack_num], dtype=tf.float32)
 
-#     t = 0
-#     while not env.game_over():
+        x = tf.keras.layers.Conv2D(filters=32, kernel_size=8, strides=4)(screen_stack)
+        x = tf.keras.layers.ReLU()(x)
+        x = tf.keras.layers.Conv2D(filters=64, kernel_size=4, strides=2)(x)
+        x = tf.keras.layers.ReLU()(x)
+        x = tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=1)(x)
+        x = tf.keras.layers.ReLU()(x)
+        x = tf.keras.layers.Flatten()(x)
+        x = tf.keras.layers.Dense(units=512)(x)
+        x = tf.keras.layers.ReLU()(x)
+        Q = tf.keras.layers.Dense(para.action_num)(x)
 
-#         state = frames_to_state(input_frames)
+        model = tf.keras.Model(name=name, inputs=screen_stack, outputs=Q)
 
-#         # feed current state and select an action
-#         action = online_agent.select_action(state)
+        return model
 
-#         # execute the action and get reward
-#         reward = env.act(env.getActionSet()[action])
+    def loss(self, state, action, reward, tar_Q, ternimal):
+        output = self.model(state)
+        index = tf.stack([tf.range(tf.shape(action)[0]), action], axis=1)
+        Q = tf.gather_nd(output, index)
+        tar_Q *= ~np.array(terminal)
+        loss = tf.reduce_mean(tf.square(reward + self.para.discount_factor * tar_Q - Q))
+        return loss
 
-#         # record frame
-#         if episode % save_video_every_episode == 0:
-#             frames.append(env.getScreenRGB())
+    def max_Q(self, state):
+        output = self.model(state)
+        return tf.reduce_max(output, axis=1)
 
-#         # record input frame
-#         input_frames.append(preprocess_screen(env.getScreenGrayscale()))
+    def select_action(self, state): 
+        if np.random.rand() < self.para.exploring_rate:
+            action = np.random.choice(self.para.num_action)   
+        else:
+            state = np.expand_dims(state, axis = 0)
+            output = self.model(state)
+            action = tf.argmax(output, axis=1)[0]
 
-#         # cumulate reward
-#         cum_reward += reward
+        return action
 
-#         # observe the result
-#         state_prime = frames_to_state(input_frames)  # get next state
 
-#         # append experience for this episode
-#         if episode % print_every_episode != 0:
-#             buffer.add((state, action, reward, state_prime, env.game_over()))
+    def update_parameters(self, episode):
+        self.para.exploring_rate = max(self.para.min_exploring_rate, min(0.5, 0.99**((episode) / 30)))
 
-#         # Setting up for the next iteration
-#         state = state_prime
-#         t += 1
+    def shutdown_explore(self):
+        # make action selection greedy
+        self.para.exploring_rate = 0
 
-#         # update agent
-#         if episode > NUM_EXPLORE and episode % print_every_episode != 0:
-#             iter_num += 1
-#             train_states, train_actions, train_rewards, train_states_prime, terminal = buffer.sample(BATCH_SIZE)
-#             train_states = np.asarray(train_states).reshape(-1, IMG_WIDTH, IMG_HEIGHT, NUM_STACK)
-#             train_states_prime = np.asarray(train_states_prime).reshape(-1, IMG_WIDTH, IMG_HEIGHT, NUM_STACK)
 
-#             # convert Python object to Tensor to prevent graph re-tracing
-#             train_states = tf.convert_to_tensor(train_states, tf.float32)
-#             train_actions = tf.convert_to_tensor(train_actions, tf.int32)
-#             train_rewards = tf.convert_to_tensor(train_rewards, tf.float32)
-#             train_states_prime = tf.convert_to_tensor(train_states_prime, tf.float32)
-#             terminal = tf.convert_to_tensor(terminal, tf.bool)
 
-#             train_step(train_states, train_actions, train_rewards, train_states_prime, terminal)
 
-#         # synchronize target model's weight with online model's weight every 1000 iterations
-#         if iter_num % update_every_iteration == 0 and episode > NUM_EXPLORE and episode % print_every_episode != 0:
-#             target_agent.model.set_weights(online_agent.model.get_weights())
 
-#     # update exploring rate
-#     online_agent.update_parameters(episode)
-#     target_agent.update_parameters(episode)
 
-#     if episode % print_every_episode == 0 and episode > NUM_EXPLORE:
-#         print(
-#             "[{}] time live:{}, cumulated reward: {}, exploring rate: {}, average loss: {}".
-#             format(episode, t, cum_reward, online_agent.exploring_rate, average_loss.result()))
-#         average_loss.reset_states()
 
-#     if episode % save_video_every_episode == 0:  # for every 500 episode, record an animation
-#         clip = make_anim(frames, fps=60, true_image=True).rotate(-90)
-#         clip.write_videofile("movie_f/DQN_demo-{}.webm".format(episode), fps=60)
 
 
+# agent for frequently updating
+online_agent = Agent('online')
 
+# agent for slow updating
+target_agent = Agent('target')
+target_agent.model.set_weights(online_agent.model.get_weights())
 
+optimizer = tf.keras.optimizers.Adam(learning_rate=1e-5)
+average_loss = tf.keras.metrics.Mean(name='loss')
 
 
+@tf.function
+def train_step(state, action, reward, next_state, ternimal):
+    
+    tar_Q = target_agent.max_Q(next_state)
 
+    with tf.GradientTape() as tape:
+        loss = online_agent.loss(state, action, reward, tar_Q, ternimal)
 
+    gradients = tape.gradient(loss, online_agent.model.trainable_variables)
+    optimizer.apply_gradients(zip(gradients, online_agent.model.trainable_variables))
 
+    average_loss.update_state(loss)
 
 
 
+    
+class Replay_buffer():
 
+    def __init__(self, buffer_size=50000):
+        self.experiences = []
+        self.buffer_size = buffer_size
+
+    def add(self, experience):
+        if len(self.experiences) >= self.buffer_size:
+            self.experiences.pop(0)
+        self.experiences.append(experience)
+
+    def sample(self, size):
+        """
+        sample experience from buffer
+        """
+        if size > len(self.experiences):
+            experiences_idx = np.random.choice(len(self.experiences), size=size)
+        else:
+            experiences_idx = np.random.choice(len(self.experiences), size=size, replace=False)
+
+        # from all sampled experiences, extract a tuple of (s,a,r,s')
+        states = []
+        actions = []
+        rewards = []
+        states_prime = []
+        terminal = []
+        for i in range(size):
+            states.append(self.experiences[experiences_idx[i]][0])
+            actions.append(self.experiences[experiences_idx[i]][1])
+            rewards.append(self.experiences[experiences_idx[i]][2])
+            states_prime.append(self.experiences[experiences_idx[i]][3])
+            terminal.append(self.experiences[experiences_idx[i]][4])
+
+        return states, actions, rewards, states_prime, terminal
+
+
+buffer = Replay_buffer()
+
+
+
+
+
+
+def preprocess_screen(screen):
+    screen = skimage.transform.resize(screen, [IMG_WIDTH, IMG_HEIGHT, 1])
+    return screen
+
+
+def stack_frames(input_frames):
+    if(len(input_frames) == 1):
+        state = np.concatenate(input_frames*4, axis=-1)
+    elif(len(input_frames) == 2):
+        state = np.concatenate(input_frames[0:1]*2 + input_frames[1:]*2, axis=-1)
+    elif(len(input_frames) == 3):
+        state = np.concatenate(input_frames + input_frames[2:], axis=-1)
+    else:
+        state = np.concatenate(input_frames[-4:], axis=-1)
+
+    return state
+    
+
+
+update_every_iteration = 1000
+print_every_episode = 500
+save_video_every_episode = 5000
+NUM_EPISODE = 20000
+NUM_EXPLORE = 20
+BATCH_SIZE = 32
+
+iter_num = 0
+
+
+
+
+
+for episode in range(0, NUM_EPISODE + 1):
+
+    # Reset the environment
+    env.reset_game()
+
+  
+    # input frame
+    input_frames = [preprocess_screen(env.getScreenGrayscale())]
+
+    # for every 500 episodes, shutdown exploration to see the performance of greedy action
+    if episode % print_every_episode == 0:
+        online_agent.shutdown_explore()
+
+    # cumulate reward for this episode
+    cum_reward = 0
+
+    t = 0
+    while not env.game_over():
+
+        state = stack_frames(input_frames)
+
+        # feed current state and select an action
+        action = online_agent.select_action(state)
+
+        # execute the action and get reward
+        reward = env.act(env.getActionSet()[action])
+
+      
+        # record input frame
+        input_frames.append(preprocess_screen(env.getScreenGrayscale()))
+
+        # cumulate reward
+        cum_reward += reward
+
+        # observe the result
+        state_prime = stack_frames(input_frames)  # get next state
+
+        # append experience for this episode
+        if episode % print_every_episode != 0:
+            buffer.add((state, action, reward, state_prime, env.game_over()))
+
+        # Setting up for the next iteration
+        state = state_prime
+        t += 1
+
+        # update agent
+        if episode > NUM_EXPLORE and episode % print_every_episode != 0:
+            iter_num += 1
+            train_states, train_actions, train_rewards, train_states_prime, terminal = buffer.sample(BATCH_SIZE)
+            train_states = np.asarray(train_states).reshape(-1, IMG_WIDTH, IMG_HEIGHT, NUM_STACK)
+            train_states_prime = np.asarray(train_states_prime).reshape(-1, IMG_WIDTH, IMG_HEIGHT, NUM_STACK)
+
+            # convert Python object to Tensor to prevent graph re-tracing
+            train_states = tf.convert_to_tensor(train_states, tf.float32)
+            train_actions = tf.convert_to_tensor(train_actions, tf.int32)
+            train_rewards = tf.convert_to_tensor(train_rewards, tf.float32)
+            train_states_prime = tf.convert_to_tensor(train_states_prime, tf.float32)
+            terminal = tf.convert_to_tensor(terminal, tf.bool)
+
+            train_step(train_states, train_actions, train_rewards, train_states_prime, terminal)
+
+        # synchronize target model's weight with online model's weight every 1000 iterations
+        if iter_num % update_every_iteration == 0 and episode > NUM_EXPLORE and episode % print_every_episode != 0:
+            target_agent.model.set_weights(online_agent.model.get_weights())
+
+
+
+
+    # update exploring rate
+    online_agent.update_parameters(episode)
+    target_agent.update_parameters(episode)
+
+    if episode % print_every_episode == 0 and episode > NUM_EXPLORE:
+        print(
+            "[{}] time live:{}, cumulated reward: {}, exploring rate: {}, average loss: {}".
+            format(episode, t, cum_reward, online_agent.exploring_rate, average_loss.result()))
+        average_loss.reset_states()
+
+
+
+#########################################
+
+
+
+class Replay_buffer():
+
+    def __init__(self, buffer_size=50000):
+        self.experiences = []
+        self.buffer_size = buffer_size
+
+    def add(self, experience):
+        if len(self.experiences) >= self.buffer_size:
+            self.experiences.pop(0)
+        self.experiences.append(experience)
+
+    def sample(self, size):
+     
+        if size > len(self.experiences):
+            idx = np.random.choice(len(self.experiences), size=size)
+        else:
+            idx = np.random.choice(len(self.experiences), size=size, replace=False)
+
+        # from all sampled experiences, extract a tuple of (s,a,r,s')
+        states = []
+        actions = []
+        rewards = []
+        states_prime = []
+        terminal = []
+        for i in range(size):
+            exp = self.experiences[idx[i]]
+            states.append(exp[0])
+            actions.append(exp[1])
+            rewards.append(exp[2])
+            states_prime.append(exp[3])
+            terminal.append(exp[4])
+
+        return states, actions, rewards, states_prime, terminal
+
+
+buffer = Replay_buffer()
+
+
+
+
+
+def rgb2gray(rgb): 
+    # TODO: test correctness.
+    return np.dot(rgb[...,:3], [0.2989, 0.5870, 0.1140])
+
+def preprocess_screen(screen): 
+    screen = rgb2gray(screen)
+    print(f'screen.shape: {screen.shape}')
+    return screen
+
+
+
+ 
+
+class Trainer():
+    def __init__(self, para, buffer):
+        self.buffer = buffer
+        self.para = para
+
+    def collect_data(self):
+
+        for episode in range(1, self.para.episode_num + 1):
+
+            state = env.reset()       
+            input_frames = [preprocess_screen(state)]
+            state_stack = stack_frames(input_frames)
+
+            cum_reward = 0
+
+            t = 0
+            done = False
+            while not done:
+  
+                action = online_agent.select_action(state_stack)
+ 
+                state_next, reward, done, info = env.step(action)
+                cum_reward += reward
+             
+                input_frames.append(preprocess_screen(state_next))
+                state_next_stack = stack_frames(input_frames)  # get next state
+ 
+                self.buffer.add((state_stack, action, reward, state_next_stack, done))
+ 
+                state_stack = state_next_stack
+                t += 1
+
+
+
+    def train(self):
+        for i in range(self.para.iter_num):
+
+            self.collect_data()  
+            experience = self.buffer.sample(self.para.batch_size)
+            self.train_step(experience)
+
+            if i % update_every_iteration == 0 and episode > NUM_EXPLORE and episode % print_every_episode != 0:
+                target_agent.model.set_weights(online_agent.model.get_weights())
+
+ 
+    def train_step(experience):
+        states, actions, rewards, states_next, terminal = experience      
+        
+        states = np.asarray(states).reshape(-1, self.img_shape[1], self.img_shape[0], self.img_stack_num)
+        states_next = np.asarray(states_next).reshape(-1, self.img_shape[1], self.img_shape[0], self.img_stack_num)
+    
+        states = tf.convert_to_tensor(states, tf.float32)
+        actions = tf.convert_to_tensor(actions, tf.int32)
+        rewards = tf.convert_to_tensor(rewards, tf.float32)
+        states_next = tf.convert_to_tensor(states_next, tf.float32)
+        terminals = tf.convert_to_tensor(terminal, tf.bool)
+
+        self._train_step(states, actions, rewards, states_next, terminals)
+
+
+    @tf.function
+    def _train_step(state, action, reward, next_state, terminal):
+        
+        tar_Q = target_agent.max_Q(next_state)
+
+        with tf.GradientTape() as tape:
+            loss = online_agent.loss(state, action, reward, tar_Q, terminal)
+
+        gradients = tape.gradient(loss, online_agent.model.trainable_variables)
+        optimizer.apply_gradients(zip(gradients, online_agent.model.trainable_variables))
+
+        average_loss.update_state(loss)
+
+
+
+    def evaluate(self):
+
+
+
+
+
+
+trainer = Trainer(para, buffer)
+trainer.train()
 
 
 
