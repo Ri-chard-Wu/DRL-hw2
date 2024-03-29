@@ -49,10 +49,9 @@ class AttrDict(dict):
 class Agent:
 
     def __init__(self, name, para):   
-        self.para = para
-
-        
+        self.para = para 
         self.model = self.build_model(name)
+     
         
  
     def build_model(self, name):
@@ -61,11 +60,11 @@ class Agent:
         input_shape = [self.para.img_shape[0], self.para.img_shape[1], self.para.img_stack_num]
         screen_stack = tf.keras.Input(shape=input_shape, dtype=tf.float32)
 
-        x = tf.keras.layers.Conv2D(filters=32, kernel_size=8, strides=4)(screen_stack)
+        x = tf.keras.layers.Conv2D(filters=32, kernel_size=8, strides=4)(screen_stack) # (4, 8, 8, 32)
         x = tf.keras.layers.ReLU()(x)
-        x = tf.keras.layers.Conv2D(filters=64, kernel_size=4, strides=2)(x)
+        x = tf.keras.layers.Conv2D(filters=64, kernel_size=4, strides=2)(x) # (32, 4, 4, 64)
         x = tf.keras.layers.ReLU()(x)
-        x = tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=1)(x)
+        x = tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=1)(x) # (64, 3, 3, 64)
         x = tf.keras.layers.ReLU()(x)
         x = tf.keras.layers.Flatten()(x)
         x = tf.keras.layers.Dense(units=512)(x)
@@ -90,7 +89,7 @@ class Agent:
         return tf.reduce_max(output, axis=1)
 
     def select_action(self, state): 
-        if np.random.rand() < self.para.exploring_rate:
+        if np.random.rand() < self.para.eps_cur:
             action = np.random.choice(self.para.action_num)   
         else:
             state = np.expand_dims(state, axis = 0)
@@ -101,8 +100,10 @@ class Agent:
         return action
 
 
-    # def update_parameters(self, episode):
-    #     self.para.exploring_rate = max(self.para.min_exploring_rate, min(0.5, 0.99**((episode) / 30)))
+    def update_parameters(self, i):
+        para = self.para  
+        para.eps_cur = para.eps_begin + (i / para.iter_num) * (para.eps_end - para.eps_begin)
+
 
     # def shutdown_explore(self):
     #     # make action selection greedy
@@ -110,13 +111,13 @@ class Agent:
  
 
     def save_checkpoint(self, path):  
-        print(f'saved ckpt {path}') 
+        print(f'- saved ckpt {path}') 
         self.model.save_weights(path)
          
     def load_checkpoint(self, path): 
         # need call once to enable load weights.
-        print(f'loaded ckpt {path}') 
-        self.model(tf.random.uniform(shape=[self.para.img_shape[0], self.para.img_shape[1], 
+        print(f'- loaded ckpt {path}') 
+        self.model(tf.random.uniform(shape=[1, self.para.img_shape[0], self.para.img_shape[1], 
                                                         self.para.img_stack_num]))
         self.model.load_weights(path)
 
@@ -165,6 +166,7 @@ def rgb2gray(rgb):
     return np.dot(rgb[...,:3], [0.2989, 0.5870, 0.1140])
 
 def preprocess_screen(screen): 
+    screen = screen[::2,::2,:]
     screen = rgb2gray(screen) 
     screen = screen[..., np.newaxis] # shape is (h, w, 1)
     return screen
@@ -189,88 +191,98 @@ class Trainer():
         self.buffer = buffer 
         
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=1e-5)
-      
+        
         self.online_agent = Agent('online', para) 
+        if('ckpt_load_path' in self.para): 
+            self.online_agent.load_checkpoint(self.para.ckpt_load_path)
+         
+
         self.target_agent = Agent('target', para) 
         self.target_agent.model.set_weights(self.online_agent.model.get_weights())
  
 
-    def executeEpisodes(self, explore=True, saveToBuffer=True):
+    def executeEpisode(self, explore=True, saveToBuffer=True):
 
-        # if(not explore):
-        #     self.online_agent.shutdown_explore()
+        state = env.reset()       
+        input_frames = [preprocess_screen(state)]
+        state_stack = stack_frames(input_frames)
 
-        cum_rewards = []
-        for episode in range(1, self.para.episode_num + 1):
-            
-            print(f'episode: {episode}')
+        cum_reward = 0
+        logs = []
 
-            state = env.reset()       
-            input_frames = [preprocess_screen(state)]
-            state_stack = stack_frames(input_frames)
+        t = 0
+        done = False
+        while not done:
 
-            cum_reward = 0
-
-            t = 0
-            done = False
-            while not done:
-  
+            if t % 4 == 0:
                 action = self.online_agent.select_action(state_stack)
+
+            state_next, reward, done, info = env.step(action)                
+            cum_reward += reward
+            
+            if(len(input_frames)>=4): input_frames.pop(0)
+            input_frames.append(preprocess_screen(state_next))
+            state_next_stack = stack_frames(input_frames)  # get next state
  
-                state_next, reward, done, info = env.step(action)
+            # if reward > 0 or reward < -5 or np.random.rand() < 0.05: 
+            if t % 4 == 0:
+                self.buffer.add((state_stack, action, reward, state_next_stack, done)) 
                 
-                cum_reward += reward
-             
-                if(len(input_frames)>=4): input_frames.pop(0)
-                input_frames.append(preprocess_screen(state_next))
-                state_next_stack = stack_frames(input_frames)  # get next state
- 
-               
-                state_stack = state_next_stack
-                t += 1
- 
-                if reward != 0 or np.random.rand() < 0.05:
+                log = {}
+                log['t'] = t 
+                log['done'] = done 
+                log['reward'] = reward                                                
+                for i in ['life','score','time','x_pos', 'y_pos']: log[i] = info[i]
+                logs.append(log) 
+            
+            state_stack = state_next_stack
+            t += 1
 
-                    im = Image.fromarray(state_next[::2,::2,:])
-                    im.save(f"state_{t}.jpeg")
-                    exit()
-
-                    self.buffer.add((state_stack, action, reward, state_next_stack, done))                
-                    partial_info = {}
-                    for i in ['life', 'time', 'x_pos', 'y_pos']: partial_info[i] = info[i]
-                    print(f't: {t}, reward: {reward}, buf_len: {len(self.buffer.experiences)}, info: {partial_info}')
-
-                # self.buffer.add((state_stack, action, reward, state_next_stack, done))                
-                # if(len(self.buffer.experiences) > self.para.batch_size): break
-
-            cum_rewards.append(cum_reward)
-
-        return np.mean(cum_rewards)
+        return cum_reward, logs
 
 
     def train(self):
+
+        cum_rewards = []
+
         for i in range(self.para.iter_num):
             print(f'##########################')
             print(f'iter: {i}')
+            
+
+            with open("log.txt", "w") as f: 
+                f.write(f"iter: {i}\n")
+                    
+            # for episode in range(1, self.para.episode_num + 1):
+            cum_reward, logs = self.executeEpisode()  
+            with open("log.txt", "a") as f: 
+                for log in logs:
+                    f.write(str(log)+'\n')
+            
+            cum_rewards.append(cum_reward)
+            print(f'cum_rewards: {cum_rewards}')
             print(f'len(self.buffer.experiences): {len(self.buffer.experiences)}')
 
-            cum_reward = self.executeEpisodes()  
-            print(f'cum_reward: {cum_reward}')
-
-            losses = []
+            
             n = int(len(self.buffer.experiences) / self.para.batch_size)
-            for epoch in range(self.para.epoch_num):   
+            for epoch in range(self.para.epoch_num):  
+                losses = [] 
                 for j in range(n):
                     experience = self.buffer.sample(self.para.batch_size)
                     loss = self.train_step(experience)
                     losses.append(loss)
-            print(f'loss: {np.mean(losses)}')
+                print(f'epoch: {epoch}, loss: {np.mean(losses)}')
 
             if i % self.para.update_target_agent_period == 0:
                 self.target_agent.model.set_weights(self.online_agent.model.get_weights())
 
             if i % self.para.save_period == 0:
-                self.online_agent.save_checkpoint(self.para.ckpt)
+                self.online_agent.save_checkpoint(self.para.ckpt_save_path)
+
+
+            self.online_agent.update_parameters(i)
+            print(f'self.para.eps_cur: {self.para.eps_cur}')
+
 
 
     def train_step(self, experience):
@@ -319,24 +331,29 @@ class Trainer():
 
 para = AttrDict({
     'action_num': len(COMPLEX_MOVEMENT), 
-    'img_shape': (240, 256, 3),
+    # 'img_shape': (240, 256, 3),
+    'img_shape': (120, 128, 3),
     'img_stack_num': 4,
 
     'buf_size': 2**12,
     
-    'iter_num': 20000,
+    'iter_num': 100000,
     'episode_num': 1,
-    'epoch_num': 5,
+    'epoch_num': 25,
     'batch_size': 32,
     'update_target_agent_period': 1,
     'save_period': 5,
  
 
     'discount_factor': 0.99,
-    'exploring_rate': 0.1,
-    'min_exploring_rate': 0.01,
+    
+    'eps_cur': 0.1,
+    'eps_begin': 0.1,
+    'eps_end': 0.01,
+    
 
-    'ckpt': "111022533_hw2/checkpoint.h5"
+    'ckpt_save_path': "111022533_hw2/ckpt/checkpoint2.h5",
+    'ckpt_load_path': "111022533_hw2/ckpt/checkpoint1.h5"
 })
 
 
