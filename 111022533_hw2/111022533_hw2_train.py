@@ -56,85 +56,6 @@ env.close()
 
 
 
- 
-
-para = AttrDict({
-    'action_num': len(COMPLEX_MOVEMENT), 
-    'img_shape': (240, 256, 3),
-    'img_stack_num': 4,
-    
-    'iter_num': 20000,
-    'episode_num': 10, 
-    'batch_size': 32
-
-    'min_exploring_rate': 0.01,
-
-    'discount_factor': 0.99,
-    'exploring_rate': 0.1
-})
-
-# print(f'list(para.img_shape): {list(para.img_shape)}')
-class Agent:
-
-    def __init__(self, name, para):  
-        self.model = Agent.build_model(name)
-        self.para = deepcopy(para)
-        
-
-    @staticmethod
-    def build_model(name):
-        # input: state
-        # output: each action's Q-value
-        screen_stack = tf.keras.Input(shape=[para.img_shape[1], para.img_shape[0], 
-                                                        para.img_stack_num], dtype=tf.float32)
-
-        x = tf.keras.layers.Conv2D(filters=32, kernel_size=8, strides=4)(screen_stack)
-        x = tf.keras.layers.ReLU()(x)
-        x = tf.keras.layers.Conv2D(filters=64, kernel_size=4, strides=2)(x)
-        x = tf.keras.layers.ReLU()(x)
-        x = tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=1)(x)
-        x = tf.keras.layers.ReLU()(x)
-        x = tf.keras.layers.Flatten()(x)
-        x = tf.keras.layers.Dense(units=512)(x)
-        x = tf.keras.layers.ReLU()(x)
-        Q = tf.keras.layers.Dense(para.action_num)(x)
-
-        model = tf.keras.Model(name=name, inputs=screen_stack, outputs=Q)
-
-        return model
-
-    def loss(self, state, action, reward, tar_Q, ternimal):
-        output = self.model(state)
-        index = tf.stack([tf.range(tf.shape(action)[0]), action], axis=1)
-        Q = tf.gather_nd(output, index)
-        tar_Q *= ~np.array(terminal)
-        loss = tf.reduce_mean(tf.square(reward + self.para.discount_factor * tar_Q - Q))
-        return loss
-
-    def max_Q(self, state):
-        output = self.model(state)
-        return tf.reduce_max(output, axis=1)
-
-    def select_action(self, state): 
-        if np.random.rand() < self.para.exploring_rate:
-            action = np.random.choice(self.para.num_action)   
-        else:
-            state = np.expand_dims(state, axis = 0)
-            output = self.model(state)
-            action = tf.argmax(output, axis=1)[0]
-
-        return action
-
-
-    def update_parameters(self, episode):
-        self.para.exploring_rate = max(self.para.min_exploring_rate, min(0.5, 0.99**((episode) / 30)))
-
-    def shutdown_explore(self):
-        # make action selection greedy
-        self.para.exploring_rate = 0
-
-
-
 
 
 
@@ -327,6 +248,85 @@ for episode in range(0, NUM_EPISODE + 1):
 
 
 
+
+ 
+
+# print(f'list(para.img_shape): {list(para.img_shape)}')
+class Agent:
+
+    def __init__(self, name, para):  
+        self.model = Agent.build_model(name)
+        self.para = deepcopy(para)
+        
+
+    @staticmethod
+    def build_model(name):
+        # input: state
+        # output: each action's Q-value
+        screen_stack = tf.keras.Input(shape=[self.para.img_shape[1], self.para.img_shape[0], 
+                                                        self.para.img_stack_num], dtype=tf.float32)
+
+        x = tf.keras.layers.Conv2D(filters=32, kernel_size=8, strides=4)(screen_stack)
+        x = tf.keras.layers.ReLU()(x)
+        x = tf.keras.layers.Conv2D(filters=64, kernel_size=4, strides=2)(x)
+        x = tf.keras.layers.ReLU()(x)
+        x = tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=1)(x)
+        x = tf.keras.layers.ReLU()(x)
+        x = tf.keras.layers.Flatten()(x)
+        x = tf.keras.layers.Dense(units=512)(x)
+        x = tf.keras.layers.ReLU()(x)
+        Q = tf.keras.layers.Dense(self.para.action_num)(x)
+
+        model = tf.keras.Model(name=name, inputs=screen_stack, outputs=Q)
+
+        return model
+
+    def loss(self, state, action, reward, tar_Q, ternimal):
+        output = self.model(state)
+        index = tf.stack([tf.range(tf.shape(action)[0]), action], axis=1)
+        Q = tf.gather_nd(output, index)
+        tar_Q *= ~np.array(terminal)
+        loss = tf.reduce_mean(tf.square(reward + self.para.discount_factor * tar_Q - Q))
+        return loss
+
+    def max_Q(self, state):
+        output = self.model(state)
+        return tf.reduce_max(output, axis=1)
+
+    def select_action(self, state): 
+        if np.random.rand() < self.para.exploring_rate:
+            action = np.random.choice(self.para.num_action)   
+        else:
+            state = np.expand_dims(state, axis = 0)
+            output = self.model(state)
+            action = tf.argmax(output, axis=1)[0]
+
+        return action
+
+
+    def update_parameters(self, episode):
+        self.para.exploring_rate = max(self.para.min_exploring_rate, min(0.5, 0.99**((episode) / 30)))
+
+    def shutdown_explore(self):
+        # make action selection greedy
+        self.para.exploring_rate = 0
+
+
+
+    def save_checkpoint(self, path):  
+        print(f'saved ckpt {path}') 
+        self.model.save_weights(path)
+         
+    def load_checkpoint(self, path): 
+        # need call once to enable load weights.
+        print(f'loaded ckpt {path}') 
+        self.model(tf.random.uniform(shape=[self.para.img_shape[1], self.para.img_shape[0], 
+                                                        self.para.img_stack_num]))
+        self.model.load_weights(path)
+
+
+
+
 class Replay_buffer():
 
     def __init__(self, buffer_size=50000):
@@ -362,7 +362,7 @@ class Replay_buffer():
         return states, actions, rewards, states_prime, terminal
 
 
-buffer = Replay_buffer()
+
 
 
 
@@ -382,9 +382,18 @@ def preprocess_screen(screen):
  
 
 class Trainer():
+
     def __init__(self, para, buffer):
-        self.buffer = buffer
+
         self.para = para
+        self.buffer = buffer 
+        
+        self.optimizer = tf.keras.optimizers.Adam(learning_rate=1e-5)
+      
+        self.online_agent = Agent('online') 
+        self.target_agent = Agent('target') 
+        self.target_agent.model.set_weights(self.online_agent.model.get_weights())
+ 
 
     def collect_data(self):
 
@@ -419,14 +428,25 @@ class Trainer():
         for i in range(self.para.iter_num):
 
             self.collect_data()  
-            experience = self.buffer.sample(self.para.batch_size)
-            self.train_step(experience)
 
-            if i % update_every_iteration == 0 and episode > NUM_EXPLORE and episode % print_every_episode != 0:
-                target_agent.model.set_weights(online_agent.model.get_weights())
+            losses = []
+            n = int(len(self.buffer.experiences) / self.para.batch_size)
+            for j in range(n):
+                experience = self.buffer.sample(self.para.batch_size)
+                loss = self.train_step(experience)
+                losses.append(loss)
 
+            print(f'iter: {i}, loss: {np.mean(losses)}')
+
+            if i % update_target_agent_period == 0:
+                self.target_agent.model.set_weights(self.online_agent.model.get_weights())
+
+            if i % save_period == 0:
+                self.online_agent.save_checkpoint(self.path.ckpt + 'checkpoint_{i}.h5')
  
+
     def train_step(experience):
+
         states, actions, rewards, states_next, terminal = experience      
         
         states = np.asarray(states).reshape(-1, self.img_shape[1], self.img_shape[0], self.img_stack_num)
@@ -438,22 +458,22 @@ class Trainer():
         states_next = tf.convert_to_tensor(states_next, tf.float32)
         terminals = tf.convert_to_tensor(terminal, tf.bool)
 
-        self._train_step(states, actions, rewards, states_next, terminals)
+        loss = self._train_step(states, actions, rewards, states_next, terminals)
+        return loss.numpy()
 
 
     @tf.function
     def _train_step(state, action, reward, next_state, terminal):
         
-        tar_Q = target_agent.max_Q(next_state)
+        tar_Q = self.target_agent.max_Q(next_state)
 
         with tf.GradientTape() as tape:
-            loss = online_agent.loss(state, action, reward, tar_Q, terminal)
+            loss = self.online_agent.loss(state, action, reward, tar_Q, terminal)
 
-        gradients = tape.gradient(loss, online_agent.model.trainable_variables)
-        optimizer.apply_gradients(zip(gradients, online_agent.model.trainable_variables))
-
-        average_loss.update_state(loss)
-
+        gradients = tape.gradient(loss, self.online_agent.model.trainable_variables)
+        self.optimizer.apply_gradients(zip(gradients, self.online_agent.model.trainable_variables))
+    
+    return loss
 
 
     def evaluate(self):
@@ -463,6 +483,28 @@ class Trainer():
 
 
 
+para = AttrDict({
+    'action_num': len(COMPLEX_MOVEMENT), 
+    'img_shape': (240, 256, 3),
+    'img_stack_num': 4,
+
+    'buf_size': 2**16,
+    
+    'iter_num': 20000,
+    'episode_num': 10, 
+    'batch_size': 32
+
+    'min_exploring_rate': 0.01,
+
+    'discount_factor': 0.99,
+    'exploring_rate': 0.1,
+
+    'ckpt': "111022533"
+})
+
+
+
+buffer = Replay_buffer(para.buf_size)
 trainer = Trainer(para, buffer)
 trainer.train()
 
