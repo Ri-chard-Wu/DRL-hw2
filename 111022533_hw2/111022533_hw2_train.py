@@ -9,40 +9,18 @@ import tensorflow.keras.backend as K
 import tensorflow as tf
 from copy import deepcopy
 
-import os
+import os 
+# from PIL import Image
 
-# from matplotlib import pyplot as plt
-from PIL import Image
-
-os.environ['CUDA_VISIBLE_DEVICES']=''
+# os.environ['CUDA_VISIBLE_DEVICES']=''
 
 
-# # actions for more complex movement
-# COMPLEX_MOVEMENT = [
-#     ['NOOP'],
-#     ['right'],
-#     ['right', 'A'],
-#     ['right', 'B'],
-#     ['right', 'A', 'B'],
-#     ['A'],
-#     ['left'],
-#     ['left', 'A'],
-#     ['left', 'B'],
-#     ['left', 'A', 'B'],
-#     ['down'],
-#     ['up'],
-# ]
+ 
 
 class AttrDict(dict):
     def __getattr__(self, a):
         return self[a]
-
-'''
- state.shape: (240, 256, 3), 
- reward: 0.0, 
- info: {'coins': 0, 'flag_get': False, 'life': 2, 'score': 0, 'stage': 1, 'status': 'small', 'time': 400, 'world': 1, 'x_pos': 40, 'y_pos': 79}
-'''
-
+ 
 
 para = AttrDict({
     'action_num': len(COMPLEX_MOVEMENT), 
@@ -50,36 +28,65 @@ para = AttrDict({
     'img_stack_num': 4,
     'k': 4,
     'frame_shape': (120, 128, 1),
-
-    # 'buf_size': 250000,
-    'buf_size': 500000,
-    
-    'step_num': 1000000,
  
-   
-    'batch_size': 32,
     
-    'save_period': 10000,
- 
-
+    'step_num': 5000000,
     'discount_factor': 0.99,
     
-    'eps_begin': 1.0,
-    'eps_end': 0.1, 
+    # 'eps_begin': 1.0,
+    # 'eps_end': 0.1
+    'eps_begin': 0.55,
+    'eps_end': 0.01, 
+    'buf_size': 450000, 
 
-    'target_update_period': 10000,
-    'replay_start_size': 10000,
-    # 'replay_start_size': 100,
-    'learning_period': 4,
+    'batch_size': 32,
     'lr': 2.5e-4,
-    
+       
+
+    # 'replay_start_size': 10000,
+    'replay_start_size': 100,
+
+    'learning_period': 4,
+    'target_update_period': 10000,
+    'save_period': 10000, 
     'log_period': 250,
 
-    'ckpt_save_path': "111022533_hw2/ckpt/checkpoint1.h5",
-    # 'ckpt_load_path': "111022533_hw2/ckpt/checkpoint0.h5"
+
+    'ckpt_save_path': "111022533_hw2/ckpt/checkpoint2.h5",
+    'ckpt_load_path': "111022533_hw2/ckpt/checkpoint1.h5"
 })
 
 
+
+
+# para = AttrDict({
+#     'action_num': len(COMPLEX_MOVEMENT), 
+#     'img_shape': (120, 128, 3),
+#     'img_stack_num': 4,
+#     'k': 4,
+#     'frame_shape': (120, 128, 1),
+ 
+    
+#     'step_num': 1000000,
+#     'discount_factor': 0.99,
+#     'eps_begin': 1.0,
+#     'eps_end': 0.1, 
+#     'buf_size': 5000, 
+
+#     'batch_size': 32,
+#     'lr': 2.5e-4,
+       
+
+#     'replay_start_size': 200,
+#     'learning_period': 4,
+#     'target_update_period': 5,
+#     'save_period': 50, 
+#     'log_period': 1,
+
+
+#     'ckpt_save_path': "111022533_hw2/ckpt/checkpoint2.h5",
+#     # 'ckpt_load_path': "111022533_hw2/ckpt/checkpoint1.h5"
+# })
 
 
  
@@ -186,24 +193,15 @@ class Agent:
             screen = rgb2gray(screen) 
             screen = screen[..., np.newaxis] # shape is (h, w, 1)
             return screen
+ 
+        state = np.concatenate([preprocess_screen(obs)] * 4, axis=-1)
+        state = np.expand_dims(state, axis = 0)
 
-        def stack_frames(input_frames):
-            if(len(input_frames) == 1):
-                state = np.concatenate(input_frames*4, axis=-1)
-            elif(len(input_frames) == 2):
-                state = np.concatenate(input_frames[0:1]*2 + input_frames[1:]*2, axis=-1)
-            elif(len(input_frames) == 3):
-                state = np.concatenate(input_frames + input_frames[2:], axis=-1)
-            else:
-                state = np.concatenate(input_frames[-4:], axis=-1)
-            return state
-
-        
-        if(len(recent_frames) >= para.k): recent_frames.pop(0)
-        recent_frames.append(preprocess_screen(obs))
-        state = stack_frames(recent_frames)
-
-        self.select_action(state)
+        # if(len(recent_frames) >= para.k): recent_frames.pop(0)
+        # recent_frames.append(preprocess_screen(obs))
+        # state = stack_frames(recent_frames)
+        assert state.shape == (1, para.frame_shape[0], para.frame_shape[1], para.k)
+        return self.select_action(state)
  
 
 
@@ -250,9 +248,20 @@ class Replay_buffer():
         return i
 
     def stack_frame(self, idx):
-        out = np.squeeze(np.stack(self.obs[idx-(para.k-1):idx+1], axis=2), axis=3)[np.newaxis,...]
-        assert out.shape == (1, para.frame_shape[0], para.frame_shape[1], para.k)
-        return out
+        
+        
+        try:
+        
+            out = np.squeeze(np.stack(self.obs[idx-(para.k-1):idx+1], axis=2), axis=3)[np.newaxis,...]
+            assert out.shape == (1, para.frame_shape[0], para.frame_shape[1], para.k)
+            return out
+
+        except:
+            print(f'idx: {idx}, self.n: {self.n}')
+            exit()
+
+        
+
 
     def add_effects(self, idx, action, reward, done):
         self.action[idx] = action
@@ -269,7 +278,7 @@ class Replay_buffer():
         # if size > self.n:
         #     idxes = np.random.choice(np.arange(para.k-1, self.n), size=size)
         # else:
-        idxes = np.random.choice(np.arange(para.k-1, self.n), size=size, replace=False)
+        idxes = np.random.choice(np.arange(para.k-1, self.n-1), size=size, replace=False)
          
         state = np.concatenate([self.stack_frame(idx) for idx in idxes], axis=0)
         action = np.array([self.action[idx] for idx in idxes])
@@ -308,22 +317,21 @@ class Trainer():
     def train(self): 
 
         obs = env_wrapper.reset()
-
-        
-        with open("log.txt", "w") as f: 
-            f.write("")
+ 
+        with open("log.txt", "w") as f: f.write("")
+        with open("cum_rewards.txt", "w") as f: f.write("")
                 
-     
- 
-        for t in range(self.para.step_num): 
-            
-            log = {'t': t}
 
-            frame_idx = self.buf.add_frame(obs)
- 
+        log = {'t': None, 'eps': None, 'loss': None, 'buf_n': None, 'cum_reward': None}
+
+        cum_reward = 0
+
+        for t in range(1, self.para.step_num+1):  
+
+            frame_idx = self.buf.add_frame(obs) 
 
             eps_cur = para.eps_cur = para.eps_begin + (t / para.step_num) * (para.eps_end - para.eps_begin)
-            log['eps'] = eps_cur
+            
 
             if t < para.replay_start_size or np.random.rand() < eps_cur:
                 action = np.random.choice(self.para.action_num)
@@ -334,12 +342,14 @@ class Trainer():
             
             obs_next, reward, done, info = env_wrapper.step(action) 
             self.buf.add_effects(frame_idx, action, reward, done)
-            
+            cum_reward += reward
             
 
             if done:
-                obs_next = env_wrapper.reset()
- 
+                obs_next = env_wrapper.reset()            
+                with open("cum_rewards.txt", "a") as f: f.write(str({'t': t, 'cum_reward': cum_reward})+'\n')
+                cum_reward = 0
+                
             obs = obs_next 
 
             if t > para.replay_start_size and t % para.learning_period == 0:
@@ -354,16 +364,20 @@ class Trainer():
                 if t % (para.save_period * para.learning_period) == 0:
                     self.online_agent.save_checkpoint(self.para.ckpt_save_path)
 
-
+            
                 if t % (para.log_period * para.learning_period) == 0:
                     
+                    log['t'] = t
+                    log['eps'] = eps_cur
                     log['loss'] = loss
                     log['buf_n'] = self.buf.n                
 
-                    with open("log.txt", "a") as f: 
-                        f.write(str(log)+'\n')
+                    with open("log.txt", "a") as f: f.write(str(log)+'\n')
+
+                    log = {'t': None, 'eps': None, 'loss': None, 'buf_n': None, 'cum_reward': None}
 
 
+                
 
 
     def train_step(self, batch):
@@ -402,45 +416,26 @@ class Trainer():
         return loss
  
 
-    def evaluate(self):
- 
+    def evaluate(self): 
 
+        print('evaluating...')
 
-
-        obs = env.reset()       
-        # input_frames = [preprocess_screen(state)]
-        # state_stack = stack_frames(input_frames)
-
-        cum_reward = 0
-
-        t = 0
+        _env = gym_super_mario_bros.make('SuperMarioBros-v0')
+        _env = JoypadSpace(_env, COMPLEX_MOVEMENT)
+        
+        
+        cum_reward = 0 
         done = False
-        while not done:
- 
+        obs = _env.reset()    
+
+        while not done: 
             action = self.online_agent.act(obs)
+            obs, reward, done, _ = _env.step(action)                
+            cum_reward += reward 
 
-            state_next, reward, done, info = env.step(action)                
-            cum_reward += reward
-            
-            if(len(input_frames)>=4): input_frames.pop(0)
-            input_frames.append(preprocess_screen(state_next))
-            state_next_stack = stack_frames(input_frames)  # get next state
+        _env.close()  
 
-            # if reward > 0 or reward < -5 or np.random.rand() < 0.05: 
-            if t % 4 == 0:
-                self.buffer.add((state_stack, action, reward, state_next_stack, done)) 
-                
-                log = {}
-                log['t'] = t 
-                log['done'] = done 
-                log['reward'] = reward                                                
-                for i in ['life','score','time','x_pos', 'y_pos']: log[i] = info[i]
-                logs.append(log) 
-            
-            state_stack = state_next_stack
-            t += 1
-
-        return cum_reward, logs
+        return cum_reward
 
             
 buffer = Replay_buffer(para.buf_size)
