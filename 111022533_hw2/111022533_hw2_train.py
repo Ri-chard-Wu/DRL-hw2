@@ -35,7 +35,7 @@ para = AttrDict({
     
     # 'eps_begin': 1.0,
     # 'eps_end': 0.1
-    'eps_begin': 0.55,
+    'eps_begin': 0.5,
     'eps_end': 0.01, 
     'buf_size': 450000, 
 
@@ -52,8 +52,8 @@ para = AttrDict({
     'log_period': 250,
 
 
-    'ckpt_save_path': "111022533_hw2/ckpt/checkpoint2.h5",
-    'ckpt_load_path': "111022533_hw2/ckpt/checkpoint1.h5"
+    'ckpt_save_path': "111022533_hw2/ckpt/checkpoint3.h5",
+    'ckpt_load_path': "111022533_hw2/ckpt/checkpoint2.h5"
 })
 
 
@@ -84,8 +84,8 @@ para = AttrDict({
 #     'log_period': 1,
 
 
-#     'ckpt_save_path': "111022533_hw2/ckpt/checkpoint2.h5",
-#     # 'ckpt_load_path': "111022533_hw2/ckpt/checkpoint1.h5"
+#     'ckpt_save_path': "111022533_hw2/ckpt/checkpoint3.h5",
+#     # 'ckpt_load_path': "111022533_hw2/ckpt/checkpoint2.h5"
 # })
 
 
@@ -112,7 +112,7 @@ class EnvWrapper:
 
             if done: break
 
-        cum_reward = min(max(cum_reward, -1), 1)
+        # cum_reward = min(max(cum_reward, -1), 1)
         return obs_next, cum_reward, done, info
  
     def reset(self):
@@ -241,18 +241,22 @@ class Replay_buffer():
 
         self.obs[i] = self._preprocess_frame(frame)
 
-        
-
         self.n = min(self.n + 1, self.size)
 
         return i
+
 
     def stack_frame(self, idx):
         
         
         try:
-        
-            out = np.squeeze(np.stack(self.obs[idx-(para.k-1):idx+1], axis=2), axis=3)[np.newaxis,...]
+            if(idx < para.k-1):
+                print(f'!!!!!!!!!!! idx < para.k-1 !!!!!!')
+                d = para.k - (idx+1) 
+                out = np.concatenate([i[np.newaxis,...] for i in self.obs[-d:]] + [i[np.newaxis,...] for i in self.obs[:idx+1]], axis=3)
+            else:
+                out = np.squeeze(np.stack(self.obs[idx-(para.k-1):idx+1], axis=2), axis=3)[np.newaxis,...]
+
             assert out.shape == (1, para.frame_shape[0], para.frame_shape[1], para.k)
             return out
 
@@ -338,11 +342,15 @@ class Trainer():
             else:
                 state = self.buf.stack_frame(frame_idx) # (1, h, w, k)
                 action = self.online_agent.select_action(state)
-                
+                 
+                                
             
             obs_next, reward, done, info = env_wrapper.step(action) 
-            self.buf.add_effects(frame_idx, action, reward, done)
             cum_reward += reward
+            
+            reward = min(max(reward, -1), 1)
+            self.buf.add_effects(frame_idx, action, reward, done)
+            
             
 
             if done:
