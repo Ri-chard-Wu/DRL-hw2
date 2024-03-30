@@ -102,7 +102,7 @@ class Agent:
 
     def update_parameters(self, i):
         para = self.para  
-        para.eps_cur = para.eps_begin + (i / para.iter_num) * (para.eps_end - para.eps_begin)
+        para.eps_cur = para.eps_begin + (i / para.eps_periods) * (para.eps_end - para.eps_begin)
 
 
     # def shutdown_explore(self):
@@ -337,23 +337,24 @@ para = AttrDict({
 
     'buf_size': 2**12,
     
-    'iter_num': 100000,
+    'iter_num': 10000,
     'episode_num': 1,
-    'epoch_num': 25,
+    'epoch_num': 15,
     'batch_size': 32,
-    'update_target_agent_period': 1,
+    'update_target_agent_period': 5,
     'save_period': 5,
  
 
     'discount_factor': 0.99,
     
-    'eps_cur': 0.1,
-    'eps_begin': 0.1,
-    'eps_end': 0.01,
+    'eps_cur': 1.0,
+    'eps_begin': 1.0,
+    'eps_end': 0.1,
+    'eps_periods': 2000,
     
 
-    'ckpt_save_path': "111022533_hw2/ckpt/checkpoint2.h5",
-    'ckpt_load_path': "111022533_hw2/ckpt/checkpoint1.h5"
+    'ckpt_save_path': "111022533_hw2/ckpt/checkpoint1.h5",
+    'ckpt_load_path': "111022533_hw2/ckpt/checkpoint0.h5"
 })
 
 
