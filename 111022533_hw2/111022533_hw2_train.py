@@ -10,6 +10,7 @@ import tensorflow as tf
 from copy import deepcopy
 
 import os 
+import time
 # from PIL import Image
 
 # os.environ['CUDA_VISIBLE_DEVICES']=''
@@ -30,30 +31,33 @@ para = AttrDict({
     'frame_shape': (120, 128, 1),
  
     
-    'step_num': 5000000,
+    'step_num': 1000000,
     'discount_factor': 0.99,
     
-    # 'eps_begin': 1.0,
-    # 'eps_end': 0.1
-    'eps_begin': 0.5,
-    'eps_end': 0.01, 
+    'eps_begin': 1.0,
+    'eps_end': 0.1,
+    # 'eps_begin': 0.14,
+    # 'eps_end': 0.01, 
+
     'buf_size': 450000, 
 
     'batch_size': 32,
     'lr': 2.5e-4,
        
 
-    # 'replay_start_size': 10000,
-    'replay_start_size': 100,
+    'replay_start_size': 10000,
+    # 'replay_start_size': 100,
 
     'learning_period': 4,
     'target_update_period': 10000,
     'save_period': 10000, 
     'log_period': 250,
+    'eval_period': 5000,
+    # 'eval_period': 250,
 
 
-    'ckpt_save_path': "111022533_hw2/ckpt/checkpoint3.h5",
-    'ckpt_load_path': "111022533_hw2/ckpt/checkpoint2.h5"
+    'ckpt_save_path': "111022533_hw2/ckpt/checkpoint0.h5",
+    # 'ckpt_load_path': "111022533_hw2/ckpt/checkpoint3.h5"
 })
 
 
@@ -133,7 +137,10 @@ class Agent:
         self.para = para 
         self.model = self.build_model(name)
      
-        
+        self.skip = 4
+        self.i = 0
+        self.prev_action = 1
+        self.recent_frames = []
  
     def build_model(self, name):
         # input: state
@@ -160,6 +167,10 @@ class Agent:
         output = self.model(state)
         return tf.reduce_max(output, axis=1)
  
+    def max_action(self, state):
+        output = self.model(state)
+        # return tf.reduce_max(output, axis=1)
+        return tf.argmax(output, axis=1)
 
     def select_action(self, state):  
 
@@ -193,16 +204,48 @@ class Agent:
             screen = rgb2gray(screen) 
             screen = screen[..., np.newaxis] # shape is (h, w, 1)
             return screen
- 
-        state = np.concatenate([preprocess_screen(obs)] * 4, axis=-1)
-        state = np.expand_dims(state, axis = 0)
 
-        # if(len(recent_frames) >= para.k): recent_frames.pop(0)
-        # recent_frames.append(preprocess_screen(obs))
-        # state = stack_frames(recent_frames)
-        assert state.shape == (1, para.frame_shape[0], para.frame_shape[1], para.k)
-        return self.select_action(state)
- 
+        def stack_frames(input_frames):
+            if(len(input_frames) == 1):
+                state = np.concatenate(input_frames*4, axis=-1)
+            elif(len(input_frames) == 2):
+                state = np.concatenate(input_frames[0:1]*2 + input_frames[1:]*2, axis=-1)
+            elif(len(input_frames) == 3):
+                state = np.concatenate(input_frames + input_frames[2:], axis=-1)
+            else:
+                state = np.concatenate(input_frames[-4:], axis=-1)
+            # print(f'c state.shape: {state.shape}')
+            return state
+
+        if(self.i >= self.skip):
+
+            self.i = 0
+
+            if(len(self.recent_frames) >= 4): self.recent_frames.pop(0)
+            self.recent_frames.append(preprocess_screen(obs))
+                        
+
+            if  np.random.rand() < 0.1:
+                action = np.random.choice(para.action_num)
+            else:
+                # state = np.concatenate([preprocess_screen(obs)] * 4, axis=-1)
+                state = stack_frames(self.recent_frames) 
+                state = np.expand_dims(state, axis = 0)  
+                assert state.shape == (1, para.frame_shape[0], para.frame_shape[1], para.k)            
+                action = self.select_action(state)
+
+            self.prev_action = action
+
+            return action
+
+        else:
+            self.i += 1
+            return self.prev_action
+
+
+
+
+
 
 
 class Replay_buffer():
@@ -250,8 +293,7 @@ class Replay_buffer():
         
         
         try:
-            if(idx < para.k-1):
-                print(f'!!!!!!!!!!! idx < para.k-1 !!!!!!')
+            if(idx < para.k-1): 
                 d = para.k - (idx+1) 
                 out = np.concatenate([i[np.newaxis,...] for i in self.obs[-d:]] + [i[np.newaxis,...] for i in self.obs[:idx+1]], axis=3)
             else:
@@ -324,6 +366,7 @@ class Trainer():
  
         with open("log.txt", "w") as f: f.write("")
         with open("cum_rewards.txt", "w") as f: f.write("")
+        with open("eval.txt", "w") as f: f.write("")
                 
 
         log = {'t': None, 'eps': None, 'loss': None, 'buf_n': None, 'cum_reward': None}
@@ -372,7 +415,14 @@ class Trainer():
                 if t % (para.save_period * para.learning_period) == 0:
                     self.online_agent.save_checkpoint(self.para.ckpt_save_path)
 
-            
+
+                
+                if t % (para.eval_period * para.learning_period) == 0:
+                    # print(f'eval cum reward: {self.evaluate()}')
+                    r = self.evaluate()
+                    with open("eval.txt", "a") as f: f.write(str({'t': t, 'cum_reward': r})+'\n')
+                    self.online_agent.save_checkpoint(f"111022533_hw2/ckpt/eval_{t}.h5")
+
                 if t % (para.log_period * para.learning_period) == 0:
                     
                     log['t'] = t
@@ -400,6 +450,23 @@ class Trainer():
         notTerminals = tf.convert_to_tensor(1 - terminal, tf.float32)
 
 
+
+        # max_action = self.online_agent.max_action(states_next)
+        # max_action = tf.cast(max_action, tf.int32)
+        # Q = self.target_agent.model(states_next)
+        # # print(f'max_action.shape: {max_action.shape}, max_action: {max_action}')
+
+        # index = tf.stack([tf.range(tf.shape(max_action)[0]), max_action], axis=1)
+        # print(f'index.shape: {index}')
+        
+        # tar_Q = tf.gather_nd(Q, index)   
+        # print(f'tar_Q.shape: {tar_Q}')     
+
+        # tar_Q0 = self.target_agent.max_Q(states_next)
+        # print(f'tar_Q0.shape: {tar_Q0}')  
+
+        
+        
         loss = self._train_step(states, actions, rewards, states_next, notTerminals)
         return loss.numpy()
 
@@ -407,8 +474,18 @@ class Trainer():
     @tf.function
     def _train_step(self, state, action, reward, next_state, notTerminal):
         
-        tar_Q = self.target_agent.max_Q(next_state)
+        # tar_Q = self.target_agent.max_Q(next_state)
 
+ 
+
+        max_action = self.online_agent.max_action(next_state)
+        max_action = tf.cast(max_action, tf.int32)
+        Q = self.target_agent.model(next_state) 
+        index = tf.stack([tf.range(tf.shape(max_action)[0]), max_action], axis=1) 
+        tar_Q = tf.gather_nd(Q, index)   
+      
+    
+ 
         with tf.GradientTape() as tape:
             output = self.online_agent.model(state)
             index = tf.stack([tf.range(tf.shape(action)[0]), action], axis=1)
@@ -433,17 +510,32 @@ class Trainer():
         
         
         cum_reward = 0 
-        done = False
-        obs = _env.reset()    
+      
+        n = 5
+        time_limit = 120
+        for i in range(n):
 
-        while not done: 
-            action = self.online_agent.act(obs)
-            obs, reward, done, _ = _env.step(action)                
-            cum_reward += reward 
+            obs = _env.reset()
+            start_time = time.time()
+                        
+            while True: 
+
+                action = self.online_agent.act(obs)
+                obs, reward, done, _ = _env.step(action)                
+                cum_reward += reward 
+
+
+                if time.time() - start_time > time_limit:
+                    print(f"Time limit reached for episode {episode}")
+                    break
+
+                if done:
+                    break
+                    
 
         _env.close()  
 
-        return cum_reward
+        return cum_reward/n
 
             
 buffer = Replay_buffer(para.buf_size)
