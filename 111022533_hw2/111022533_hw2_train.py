@@ -28,15 +28,16 @@ para = AttrDict({
     'img_shape': (120, 128, 3), 
     'k': 4,
     'frame_shape': (120, 128, 1),
+    'skip': 2,
  
     
-    'step_num': 1000000,
+    'step_num': 2000000,
     'discount_factor': 0.99,
     
     'eps_begin': 1.0,
     'eps_end': 0.1,
-    # 'eps_begin': 0.5,
-    # 'eps_end': 0.1, 
+    # 'eps_begin': 0.1,
+    # 'eps_end': 0.09, 
 
     'buf_size': 450000, 
 
@@ -96,7 +97,7 @@ class EnvWrapper:
 
     def __init__(self, env):   
         self.env = env 
-        self.skip = 4
+        self.skip = para.skip
 
     def step(self, action):
         """
@@ -135,7 +136,7 @@ class Agent:
         self.para = para 
         self.model = self.build_model(name)
      
-        self.skip = 4
+        self.skip = para.skip
         self.i = 0
         self.prev_action = 1
         self.recent_frames = []
@@ -169,6 +170,7 @@ class Agent:
         output = self.model(state)
         # return tf.reduce_max(output, axis=1)
         return tf.argmax(output, axis=1)
+
 
     def select_action(self, state):  
 
@@ -219,7 +221,7 @@ class Agent:
 
             self.i = 0
 
-            if(len(self.recent_frames) >= 4): self.recent_frames.pop(0)
+            if(len(self.recent_frames) >= para.k): self.recent_frames.pop(0)
             self.recent_frames.append(preprocess_screen(obs))
                         
 
@@ -248,9 +250,11 @@ class Agent:
 
 class Replay_buffer():
 
-    def __init__(self, size=100000):
+    def __init__(self, size=100000, trainer):
         
         self.size = size
+
+        self.trainer = trainer
 
         self.n = 0
         self.wptr = 0 
@@ -260,10 +264,10 @@ class Replay_buffer():
         self.reward = np.zeros((size))
         self.done = np.zeros((size))
 
+        self.priorities = np.zeros((size)) 
+        self.priorityUpdateList = []
 
     def _preprocess_frame(self, screen):
-
-        
 
         def rgb2gray(rgb):  
             return np.dot(rgb[...,:3], [0.2989, 0.5870, 0.1140])
@@ -284,7 +288,34 @@ class Replay_buffer():
 
         self.n = min(self.n + 1, self.size)
 
+        self.priorityUpdateList.append(i)
+
         return i
+
+
+    def update_priorities(self):
+
+        idxes = []
+        remain = []
+        for i in self.priorityUpdateList:
+            if i >= para.k-1 and i < self.n-1:
+                idxes.append(i)
+            else:
+                remain.append(i)
+        self.priorityUpdateList = remain
+
+        state, action, reward, state_next, terminal = self.retrive_data(idxes)
+     
+        tar_Q = self.trainer.ddqn_tar_q(state_next) * (1 - terminal)
+    
+        output = self.trainer.online_agent.model(state)
+        index = tf.stack([tf.range(tf.shape(action)[0]), action], axis=1)
+        Q = tf.gather_nd(output, index)
+        
+        priorities = tf.square(reward + para.discount_factor * tar_Q - Q)
+
+        for i, idx in enumerate(idxes):
+            self.priorities[idx] = priorities[i]
 
 
     def stack_frame(self, idx):
@@ -315,49 +346,76 @@ class Replay_buffer():
         assert out.shape == (1, para.frame_shape[0], para.frame_shape[1], para.k)
         return out
 
-       
         
-
-
     def add_effects(self, idx, action, reward, done):
         self.action[idx] = action
         self.reward[idx] = reward
         self.done[idx] = int(done)
-        # if(done):
-        #     print(f'self.done[idx]: {self.done[idx]}')   
-
-
-    def sample(self, size):
      
+ 
+
+
+    def sample(self, size):     
+
         assert self.n >= size
 
-        # if size > self.n:
-        #     idxes = np.random.choice(np.arange(para.k-1, self.n), size=size)
-        # else:
-        idxes = np.random.choice(np.arange(para.k-1, self.n-1), size=size, replace=False)
-         
+        self.update_priorities()
+
+        s = sum(self.priorities)
+
+        if(s < 1e-7):
+            idxes = np.random.choice(np.arange(para.k-1, self.n-1), size=size, replace=False)   
+            learning_weights = tf.cast(np.ones(size), tf.float32)
+ 
+        else:
+            probs = list(self.priorities / s)
+            for i in range(para.k-1): probs[i] = 0
+            probs[self.n-1] = 0
+                
+            idxes = np.random.choice(len(probs), size, p=probs)
+            
+            probs_chosen = tf.clip_by_value([probs[i] for i in idxes], 0.000001, 1.0)
+
+            beta = 1.0
+            learning_weights = (1/(probs_chosen * len(self.n)))**beta
+            learning_weights = tf.cast(learning_weights, tf.float32)
+
+        self.priorityUpdateList.extend(list(set(idxes)))
+        return self.retrive_data(idxes), learning_weights
+
+
+
+        # return self.retrive_data(idxes)
+
+
+
+    def retrive_data(self, idxes):
+        
         state = np.concatenate([self.stack_frame(idx) for idx in idxes], axis=0)
         action = np.array([self.action[idx] for idx in idxes])
         reward = np.array([self.reward[idx] for idx in idxes])
         state_next = np.concatenate([self.stack_frame(idx+1) for idx in idxes], axis=0)
         done = np.array([self.done[idx] for idx in idxes])
 
+        state = tf.convert_to_tensor(state, tf.float32)
+        action = tf.convert_to_tensor(action, tf.int32)
+        reward = tf.convert_to_tensor(reward, tf.float32)
+        state_next = tf.convert_to_tensor(state_next, tf.float32)   
+        done = tf.convert_to_tensor(done, tf.float32)
+
         return state, action, reward, state_next, done
- 
-
-
-        
- 
 
 
 
 class Trainer():
 
-    def __init__(self, para, buf):
+    def __init__(self, para):
 
         self.para = para
-        self.buf = buf 
+        # self.buf = buf 
         
+        self.buf = Replay_buffer(para.buf_size, self)
+
         # self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.para.lr)
         self.optimizer = tf.keras.optimizers.RMSprop(learning_rate=self.para.lr, rho=0.95, epsilon=0.01)
         
@@ -416,8 +474,9 @@ class Trainer():
 
             if t > para.replay_start_size and t % para.learning_period == 0:
 
-                batch = self.buf.sample(self.para.batch_size)  
-                loss = self.train_step(batch)
+              
+                batch, learning_weights = self.buf.sample(self.para.batch_size)  
+                loss = self.train_step(batch, learning_weights)
 
                
                 if t % (para.target_update_period * para.learning_period) == 0:
@@ -427,7 +486,6 @@ class Trainer():
                     self.online_agent.save_checkpoint(self.para.ckpt_save_path)
 
 
-                
                 if t % (para.eval_period * para.learning_period) == 0:
                     # print(f'eval cum reward: {self.evaluate()}')
                     r = self.evaluate()
@@ -445,66 +503,34 @@ class Trainer():
 
                     log = {'t': None, 'eps': None, 'loss': None, 'buf_n': None, 'cum_reward': None}
 
-
-                
-
-
-    def train_step(self, batch):
  
-        states, actions, rewards, states_next, terminal = batch      
-         
-        states = tf.convert_to_tensor(states, tf.float32)
-        actions = tf.convert_to_tensor(actions, tf.int32)
-        rewards = tf.convert_to_tensor(rewards, tf.float32)
-        states_next = tf.convert_to_tensor(states_next, tf.float32)
-   
-        notTerminals = tf.convert_to_tensor(1 - terminal, tf.float32)
-
-
-
-        # max_action = self.online_agent.max_action(states_next)
-        # max_action = tf.cast(max_action, tf.int32)
-        # Q = self.target_agent.model(states_next)
-        # # print(f'max_action.shape: {max_action.shape}, max_action: {max_action}')
-
-        # index = tf.stack([tf.range(tf.shape(max_action)[0]), max_action], axis=1)
-        # print(f'index.shape: {index}')
-        
-        # tar_Q = tf.gather_nd(Q, index)   
-        # print(f'tar_Q.shape: {tar_Q}')     
-
-        # tar_Q0 = self.target_agent.max_Q(states_next)
-        # print(f'tar_Q0.shape: {tar_Q0}')  
-
-        
-        
-        loss = self._train_step(states, actions, rewards, states_next, notTerminals)
+    def train_step(self, batch, learning_weights): 
+        loss = self._train_step(batch, learning_weights)
         return loss.numpy()
+
+    
+
+    @tf.function
+    def ddqn_tar_q(self, state_next):
+        max_action = tf.cast(self.online_agent.max_action(state_next), tf.int32)        
+        Q = self.target_agent.model(state_next) 
+        index = tf.stack([tf.range(tf.shape(max_action)[0]), max_action], axis=1) 
+        tar_Q = tf.gather_nd(Q, index)   
+        return tar_Q
 
 
     @tf.function
-    def _train_step(self, state, action, reward, next_state, notTerminal):
-        
-        # tar_Q = self.target_agent.max_Q(next_state)
+    def _train_step(batch, learning_weights):
 
- 
+        state, action, reward, state_next, terminal = batch   
 
-        max_action = self.online_agent.max_action(next_state)
-        max_action = tf.cast(max_action, tf.int32)
-        Q = self.target_agent.model(next_state) 
-        index = tf.stack([tf.range(tf.shape(max_action)[0]), max_action], axis=1) 
-        tar_Q = tf.gather_nd(Q, index)   
-      
-    
- 
+        tar_Q = self.ddqn_tar_q(state_next) * (1 - terminal)
+
         with tf.GradientTape() as tape:
             output = self.online_agent.model(state)
             index = tf.stack([tf.range(tf.shape(action)[0]), action], axis=1)
             Q = tf.gather_nd(output, index)
-          
-            tar_Q *= notTerminal
-            loss = tf.reduce_mean(tf.square(reward + self.para.discount_factor * tar_Q - Q))
-            
+            loss = tf.reduce_mean(tf.square(reward + self.para.discount_factor * tar_Q - Q) * learning_weights)            
             
         gradients = tape.gradient(loss, self.online_agent.model.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.online_agent.model.trainable_variables))
@@ -549,8 +575,8 @@ class Trainer():
         return cum_reward/n
 
             
-buffer = Replay_buffer(para.buf_size)
-trainer = Trainer(para, buffer)
+
+trainer = Trainer(para)
 trainer.train()
 
 
