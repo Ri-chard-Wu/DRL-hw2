@@ -45,8 +45,8 @@ para = AttrDict({
     'lr': 2.5e-4,
        
 
-    'replay_start_size': 10000,
-    # 'replay_start_size': 100,
+    # 'replay_start_size': 10000,
+    'replay_start_size': 100,
 
     'learning_period': 4,
     'target_update_period': 10000,
@@ -56,8 +56,8 @@ para = AttrDict({
     # 'eval_period': 250,
 
 
-    'ckpt_save_path': "111022533_hw2/ckpt/checkpoint0.h5",
-    # 'ckpt_load_path': "111022533_hw2/ckpt/checkpoint0.h5"
+    'ckpt_save_path': "111022533_hw2/ckpt/checkpoint1.h5",
+    'ckpt_load_path': "111022533_hw2/ckpt/checkpoint0.h5"
 })
 
 
@@ -397,6 +397,7 @@ class Replay_buffer():
             beta = 1.0
             learning_weights = (1/(probs_chosen * self.n))**beta
             learning_weights = tf.cast(learning_weights, tf.float32)
+            learning_weights /= tf.math.reduce_max(learning_weights)
  
         return idxes, self.retrive_data(idxes), learning_weights
 
