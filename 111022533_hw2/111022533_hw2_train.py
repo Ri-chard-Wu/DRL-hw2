@@ -25,8 +25,7 @@ class AttrDict(dict):
 
 para = AttrDict({
     'action_num': len(COMPLEX_MOVEMENT), 
-    'img_shape': (120, 128, 3),
-    'img_stack_num': 4,
+    'img_shape': (120, 128, 3), 
     'k': 4,
     'frame_shape': (120, 128, 1),
  
@@ -36,8 +35,8 @@ para = AttrDict({
     
     'eps_begin': 1.0,
     'eps_end': 0.1,
-    # 'eps_begin': 0.14,
-    # 'eps_end': 0.01, 
+    # 'eps_begin': 0.5,
+    # 'eps_end': 0.1, 
 
     'buf_size': 450000, 
 
@@ -57,7 +56,7 @@ para = AttrDict({
 
 
     'ckpt_save_path': "111022533_hw2/ckpt/checkpoint0.h5",
-    # 'ckpt_load_path': "111022533_hw2/ckpt/checkpoint3.h5"
+    # 'ckpt_load_path': "111022533_hw2/ckpt/checkpoint0.h5"
 })
 
 
@@ -66,7 +65,6 @@ para = AttrDict({
 # para = AttrDict({
 #     'action_num': len(COMPLEX_MOVEMENT), 
 #     'img_shape': (120, 128, 3),
-#     'img_stack_num': 4,
 #     'k': 4,
 #     'frame_shape': (120, 128, 1),
  
@@ -291,21 +289,33 @@ class Replay_buffer():
 
     def stack_frame(self, idx):
         
+         
+        if(idx < para.k-1): 
+            d = para.k - (idx+1) 
+            out = np.concatenate([i[np.newaxis,...] for i in self.obs[-d:]] + [i[np.newaxis,...] for i in self.obs[:idx+1]], axis=3)
+        else:
+            _start = idx-(para.k-1)
+            end = idx+1 # non-inclusive
+            start = _start
+            for i in range(_start, end):
+                if self.done[i] > 0.5: start = i
         
-        try:
-            if(idx < para.k-1): 
-                d = para.k - (idx+1) 
-                out = np.concatenate([i[np.newaxis,...] for i in self.obs[-d:]] + [i[np.newaxis,...] for i in self.obs[:idx+1]], axis=3)
-            else:
-                out = np.squeeze(np.stack(self.obs[idx-(para.k-1):idx+1], axis=2), axis=3)[np.newaxis,...]
+            d = para.k - (end - start)
+            # if(d>0):
+            #     print(f'_start: {_start}, end: {end}, start: {start}, done: {self.done[_start:end]}')
+            # else:
+            #     print('no done')
 
-            assert out.shape == (1, para.frame_shape[0], para.frame_shape[1], para.k)
-            return out
+            # out = np.concatenate([i[np.newaxis,...] for i in self.obs[start:start+1]]*d  + [i[np.newaxis,...] for i in self.obs[start:end]], axis=3)
 
-        except:
-            print(f'idx: {idx}, self.n: {self.n}')
-            exit()
+            out = np.concatenate([np.zeros_like(self.obs[start])[np.newaxis,...]]*d  + [i[np.newaxis,...] for i in self.obs[start:end]], axis=3)
+ 
+            # out = np.squeeze(np.stack(self.obs[idx-(para.k-1):idx+1], axis=2), axis=3)[np.newaxis,...]
 
+        assert out.shape == (1, para.frame_shape[0], para.frame_shape[1], para.k)
+        return out
+
+       
         
 
 
@@ -348,7 +358,8 @@ class Trainer():
         self.para = para
         self.buf = buf 
         
-        self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.para.lr)
+        # self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.para.lr)
+        self.optimizer = tf.keras.optimizers.RMSprop(learning_rate=self.para.lr, rho=0.95, epsilon=0.01)
         
         self.online_agent = Agent('online', para) 
         if('ckpt_load_path' in self.para): 
