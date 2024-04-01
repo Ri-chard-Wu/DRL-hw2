@@ -11,7 +11,7 @@ from copy import deepcopy
 
 import os 
 import time
-# from PIL import Image
+from PIL import Image
 
 # os.environ['CUDA_VISIBLE_DEVICES']=''
 
@@ -25,17 +25,19 @@ class AttrDict(dict):
 
 para = AttrDict({
     'action_num': len(COMPLEX_MOVEMENT), 
-    'img_shape': (120, 128, 3), 
+    # 'img_shape': (120, 128, 3), 
+    # 'frame_shape': (120, 128, 1),
+    'img_shape': (84, 84, 3), 
+    'frame_shape': (84, 84, 1),    
     'k': 4,
-    'frame_shape': (120, 128, 1),
     'skip': 4,
  
     
-    'step_num': 2000000,
+    'step_num': 1500000,
     'discount_factor': 0.99,
     
     'eps_begin': 1.0,
-    'eps_end': 0.1,
+    'eps_end': 0.05,
     # 'eps_begin': 0.1,
     # 'eps_end': 0.09, 
 
@@ -45,8 +47,8 @@ para = AttrDict({
     'lr': 2.5e-4,
        
 
-    # 'replay_start_size': 10000,
-    'replay_start_size': 100,
+    'replay_start_size': 10000,
+    # 'replay_start_size': 100,
 
     'learning_period': 4,
     'target_update_period': 10000,
@@ -56,8 +58,8 @@ para = AttrDict({
     # 'eval_period': 250,
 
 
-    'ckpt_save_path': "111022533_hw2/ckpt/checkpoint1.h5",
-    'ckpt_load_path': "111022533_hw2/ckpt/checkpoint0.h5"
+    'ckpt_save_path': "111022533_hw2/ckpt/checkpoint0.h5",
+    # 'ckpt_load_path': "111022533_hw2/ckpt/checkpoint1.h5"
 })
 
 
@@ -98,6 +100,8 @@ class EnvWrapper:
     def __init__(self, env):   
         self.env = env 
         self.skip = para.skip
+        self.episode = 0
+        self.step = 0
 
     def step(self, action):
         """
@@ -106,6 +110,8 @@ class EnvWrapper:
         - clip reward between -1, 1.
         - return if encounter done before 4 steps.
         """        
+        self.step += 1
+
         cum_reward = 0
 
         for i in range(self.skip):
@@ -119,6 +125,8 @@ class EnvWrapper:
         return obs_next, cum_reward, done, info
  
     def reset(self):
+        self.step = 0
+        self.episode += 1
         return self.env.reset()
 
 
@@ -127,6 +135,36 @@ env = gym_super_mario_bros.make('SuperMarioBros-v0')
 env = JoypadSpace(env, COMPLEX_MOVEMENT)
  
 env_wrapper =  EnvWrapper(env)
+
+
+
+# def preprocess_screen(screen): 
+
+#     def rgb2gray(rgb):  
+#         return np.dot(rgb[...,:3], [0.2989, 0.5870, 0.1140])
+         
+#     screen = screen[::2,::2,:]
+#     screen = rgb2gray(screen) 
+#     screen = screen[..., np.newaxis] # shape is (h, w, 1)
+#     return screen
+    
+def preprocess_screen(screen): 
+
+    def rgb2gray(rgb):  
+        return np.dot(rgb[...,:3], [0.2989, 0.5870, 0.1140])
+
+    img = Image.fromarray(screen)
+    img = img.resize((84, 84), Image.BILINEAR)
+    # img.save(f"state_resize2.jpeg")
+    img = np.array(img) # (84, 84, 3)
+    # print(f'img.shape: {img.shape}')
+
+    img = rgb2gray(img) 
+    img = img[..., np.newaxis] # shape is (h, w, 1)
+    
+    return img
+
+
 
 
 
@@ -153,8 +191,18 @@ class Agent:
         x = tf.keras.layers.ReLU()(x)
         x = tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=1)(x) # (64, 3, 3, 64)
         x = tf.keras.layers.ReLU()(x)
+
+
+        # x = tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=1)(x) # (64, 3, 3, 64)
+        # x = tf.keras.layers.ReLU()(x)
+
+        # x = tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=1)(x) # (64, 3, 3, 64)
+        # x = tf.keras.layers.ReLU()(x)
+
+
+
         x = tf.keras.layers.Flatten()(x)
-        x = tf.keras.layers.Dense(units=256)(x)
+        x = tf.keras.layers.Dense(units=512)(x)
         x = tf.keras.layers.ReLU()(x)
         Q = tf.keras.layers.Dense(self.para.action_num)(x)
 
@@ -196,14 +244,6 @@ class Agent:
 
     def act(self, obs):
 
-        def rgb2gray(rgb):  
-            return np.dot(rgb[...,:3], [0.2989, 0.5870, 0.1140])
-
-        def preprocess_screen(screen): 
-            screen = screen[::2,::2,:]
-            screen = rgb2gray(screen) 
-            screen = screen[..., np.newaxis] # shape is (h, w, 1)
-            return screen
 
         def stack_frames(input_frames):
             if(len(input_frames) == 1):
@@ -264,80 +304,19 @@ class Replay_buffer():
         self.reward = np.zeros((size))
         self.done = np.zeros((size))
 
-        self.priorities = np.zeros((size)) 
-        self.priorityUnassignedList = []
-
-    def _preprocess_frame(self, screen):
-
-        def rgb2gray(rgb):  
-            return np.dot(rgb[...,:3], [0.2989, 0.5870, 0.1140])
- 
-        screen = screen[::2,::2,:]
-        screen = rgb2gray(screen) 
-        
-        screen = screen[..., np.newaxis] # shape is (h, w, 1)
-        return screen 
-        
 
     def add_frame(self, frame):
 
         i = self.wptr
         self.wptr  = (self.wptr + 1) % self.size
 
-        self.obs[i] = self._preprocess_frame(frame)
+        self.obs[i] = preprocess_screen(frame)
 
         self.n = min(self.n + 1, self.size)
-
-        self.priorityUnassignedList.append(i)
-
-        return i
+        return i 
 
 
-    def update_priorities(self, idxes, priorities):
-
-        for i, idx in enumerate(idxes):
-            self.priorities[idx] = priorities[i]
- 
-
-    def assign_initial_priorities(self):
-
-        idxes = []
-        remain = []
-        for i in self.priorityUnassignedList:
-            if i >= para.k-1 and i < self.n-1:
-                idxes.append(i)
-            else:
-                remain.append(i)
-        self.priorityUnassignedList = remain
-        # print('############')
-         
-        bs = para.batch_size
-        # print(f'[a] idxes: "{idxes}, len(idxes): {len(idxes)}, int(len(idxes) / bs): {int(len(idxes) / bs)}')
-        n = math.ceil(len(idxes) / bs)
-        for i in range(n):
-            # print(f'i: {i}, n: {n}')
-            batch_idxes = idxes[i*bs:(i+1)*bs]
-            # print(f'batch_idxes: {batch_idxes}')
-            state, action, reward, state_next, terminal = self.retrive_data(batch_idxes)
-        
-            tar_Q = self.trainer.ddqn_tar_q(state_next) * (1 - terminal)
-        
-            output = self.trainer.online_agent.model(state)
-            index = tf.stack([tf.range(tf.shape(action)[0]), action], axis=1)
-            Q = tf.gather_nd(output, index)
-            
-            priorities = tf.square(reward + para.discount_factor * tar_Q - Q)
-
-            for i, idx in enumerate(batch_idxes):
-                self.priorities[idx] = priorities[i]
-
-        # K.clear_session()
-        # tf.keras.backend.clear_session()             
-
-
-    def stack_frame(self, idx):
-        
-         
+    def stack_frame(self, idx):                 
         if(idx < para.k-1): 
             d = para.k - (idx+1) 
             out = np.concatenate([i[np.newaxis,...] for i in self.obs[-d:]] + [i[np.newaxis,...] for i in self.obs[:idx+1]], axis=3)
@@ -349,12 +328,6 @@ class Replay_buffer():
                 if self.done[i] > 0.5: start = i
         
             d = para.k - (end - start)
-            # if(d>0):
-            #     print(f'_start: {_start}, end: {end}, start: {start}, done: {self.done[_start:end]}')
-            # else:
-            #     print('no done')
-
-            # out = np.concatenate([i[np.newaxis,...] for i in self.obs[start:start+1]]*d  + [i[np.newaxis,...] for i in self.obs[start:end]], axis=3)
 
             out = np.concatenate([np.zeros_like(self.obs[start])[np.newaxis,...]]*d  + [i[np.newaxis,...] for i in self.obs[start:end]], axis=3) / 255.0
  
@@ -369,41 +342,15 @@ class Replay_buffer():
         self.reward[idx] = reward
         self.done[idx] = int(done)
      
- 
-
+  
 
     def sample(self, size):     
 
         assert self.n >= size
-
-        self.assign_initial_priorities()
-
-        s = sum(self.priorities)
-
-        if(s < 1e-7):
-            print(f'uniform sample!!')
-            idxes = np.random.choice(np.arange(para.k-1, self.n-1), size=size, replace=False)   
-            learning_weights = tf.cast(np.ones(size), tf.float32)
  
-        else:
-            probs = list(self.priorities / s)
-            for i in range(para.k-1): probs[i] = 0
-            probs[self.n-1] = 0
-                
-            idxes = np.random.choice(len(probs), size, p=probs)
-            
-            probs_chosen = tf.clip_by_value([probs[i] for i in idxes], 0.000001, 1.0)
-
-            beta = 1.0
-            learning_weights = (1/(probs_chosen * self.n))**beta
-            learning_weights = tf.cast(learning_weights, tf.float32)
-            learning_weights /= tf.math.reduce_max(learning_weights)
+        idxes = np.random.choice(np.arange(para.k-1, self.n-1), size=size, replace=False)   
  
-        return idxes, self.retrive_data(idxes), learning_weights
-
-
-
-        # return self.retrive_data(idxes)
+        return self.retrive_data(idxes)
 
 
 
@@ -427,12 +374,29 @@ class Replay_buffer():
 
 
 
+
+class Logger():
+
+    def __init__(self):
+        self.frame_dir = './img/'
+
+    def save_frame(self, name, frame):
+        img = Image.fromarray(frame)
+        # img = img.resize((84, 84), Image.BILINEAR)
+        img.save(self.frame_dir + name)    
+
+
+
+logger = Logger()
+
+
 class Trainer():
 
     def __init__(self, para):
 
         self.para = para
         # self.buf = buf 
+        
         
         self.buf = Replay_buffer(self, para.buf_size)
 
@@ -456,11 +420,13 @@ class Trainer():
         with open("log.txt", "w") as f: f.write("")
         with open("cum_rewards.txt", "w") as f: f.write("")
         with open("eval.txt", "w") as f: f.write("")
-                
+        
+       
 
         log = {'t': None, 'eps': None, 'loss': None, 'buf_n': None, 'cum_reward': None}
 
         cum_reward = 0
+        
 
         for t in range(1, self.para.step_num+1):  
 
@@ -475,11 +441,15 @@ class Trainer():
                 state = self.buf.stack_frame(frame_idx) # (1, h, w, k)
                 action = self.online_agent.select_action(state)
                  
-                                
             
             obs_next, reward, done, info = env_wrapper.step(action) 
             cum_reward += reward
-            
+
+
+            if(env_wrapper.episode % 10 == 0):
+                logger.save_frame(f'episode-{env_wrapper.episode}_step-{env_wrapper.step}.jpeg', obs_next)
+
+
             reward = min(max(reward, -1), 1)
             self.buf.add_effects(frame_idx, action, reward, done)
             
@@ -489,16 +459,15 @@ class Trainer():
                 obs_next = env_wrapper.reset()            
                 with open("cum_rewards.txt", "a") as f: f.write(str({'t': t, 'cum_reward': cum_reward})+'\n')
                 cum_reward = 0
-                
+              
             obs = obs_next 
 
             if t > para.replay_start_size and t % para.learning_period == 0:
 
               
-                idxes, batch, learning_weights = self.buf.sample(self.para.batch_size)  
-                losses = self.train_step(batch, learning_weights)
-                self.buf.update_priorities(idxes, losses)
-               
+                batch = self.buf.sample(self.para.batch_size)  
+                losses = self.train_step(batch)
+              
                 if t % (para.target_update_period * para.learning_period) == 0:
                     self.target_agent.model.set_weights(self.online_agent.model.get_weights())
  
@@ -524,8 +493,8 @@ class Trainer():
                     log = {'t': None, 'eps': None, 'loss': None, 'buf_n': None, 'cum_reward': None}
 
  
-    def train_step(self, batch, learning_weights): 
-        losses = self._train_step(batch, learning_weights)
+    def train_step(self, batch): 
+        losses = self._train_step(batch)
         return losses.numpy()
 
     
@@ -540,7 +509,7 @@ class Trainer():
 
 
     @tf.function
-    def _train_step(self, batch, learning_weights):
+    def _train_step(self, batch):
 
         state, action, reward, state_next, terminal = batch   
 
@@ -551,33 +520,14 @@ class Trainer():
             index = tf.stack([tf.range(tf.shape(action)[0]), action], axis=1)
             Q = tf.gather_nd(output, index)
             losses = tf.square(reward + self.para.discount_factor * tar_Q - Q)
-            loss = tf.reduce_mean(losses * learning_weights)            
+            loss = tf.reduce_mean(losses)            
         
         gradients = tape.gradient(loss, self.online_agent.model.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.online_agent.model.trainable_variables))
     
         return losses
  
-    # @tf.function
-    # def _train_step(self, batch, learning_weights):
-
-    #     state, action, reward, state_next, terminal = batch   
-
-    #     tar_Q = self.ddqn_tar_q(state_next) * (1 - terminal)
-
-    #     with tf.GradientTape() as tape:
-    #         output = self.online_agent.model(state)
-    #         index = tf.stack([tf.range(tf.shape(action)[0]), action], axis=1)
-    #         Q = tf.gather_nd(output, index)
-    #         # loss = tf.reduce_mean(tf.square(reward + self.para.discount_factor * tar_Q - Q) * learning_weights)            
  
-    #         losses = tf.clip_by_value(reward + self.para.discount_factor * tar_Q - Q, -1.0, 1.0) 
-    #         loss = tf.reduce_mean(tf.square(losses) * learning_weights)
-
-    #     gradients = tape.gradient(loss, self.online_agent.model.trainable_variables)
-    #     self.optimizer.apply_gradients(zip(gradients, self.online_agent.model.trainable_variables))
-    
-    #     return loss
 
 
     def evaluate(self): 
@@ -605,7 +555,7 @@ class Trainer():
 
 
                 if time.time() - start_time > time_limit:
-                    print(f"Time limit reached for episode {episode}")
+                    print(f"Time limit reached  ")
                     break
 
                 if done:
