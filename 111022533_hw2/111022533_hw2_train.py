@@ -34,11 +34,11 @@ para = AttrDict({
     'skip': 4,
  
     
-    'step_num': 1500000,
+    'step_num': 10000000,
     'discount_factor': 0.99,
     
-    'eps_begin': 1.0,
-    'eps_end': 0.05,
+    'eps_begin': 0.1,
+    'eps_end': 0.09,
     # 'eps_begin': 0.1,
     # 'eps_end': 0.09, 
 
@@ -48,8 +48,8 @@ para = AttrDict({
     'lr': 2.5e-4,
        
 
-    'replay_start_size': 10000,
-    # 'replay_start_size': 100,
+    # 'replay_start_size': 10000,
+    'replay_start_size': 100,
 
     'learning_period': 4,
     'target_update_period': 10000,
@@ -58,12 +58,12 @@ para = AttrDict({
     'eval_period': 5000,
     # 'eval_period': 250,
     
-    'save_video_period': 60,
+    'save_video_period': 500,
     # 'save_video_period': 20,
 
 
-    'ckpt_save_path': "111022533_hw2/ckpt/checkpoint0.h5",
-    # 'ckpt_load_path': "111022533_hw2/ckpt/eval_1420000.h5"
+    'ckpt_save_path': "111022533_hw2/ckpt/checkpoint2.h5",
+    'ckpt_load_path': "111022533_hw2/ckpt/checkpoint1.h5"
 })
 
 
@@ -434,9 +434,9 @@ class Trainer():
 
         obs = env.reset()
  
-        with open("log.txt", "w") as f: f.write("")
-        with open("cum_rewards.txt", "w") as f: f.write("")
-        with open("eval.txt", "w") as f: f.write("")
+        # with open("log.txt", "w") as f: f.write("")
+        # with open("cum_rewards.txt", "w") as f: f.write("")
+        # with open("eval.txt", "w") as f: f.write("")
         
        
 
