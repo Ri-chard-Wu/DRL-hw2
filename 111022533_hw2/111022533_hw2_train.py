@@ -1,6 +1,7 @@
 from nes_py.wrappers import JoypadSpace
 import gym_super_mario_bros
 from gym_super_mario_bros.actions import COMPLEX_MOVEMENT
+# import gym
 
 import numpy as np  
 import math 
@@ -56,52 +57,28 @@ para = AttrDict({
     'log_period': 250,
     'eval_period': 5000,
     # 'eval_period': 250,
+    
+    'save_video_period': 60,
+    # 'save_video_period': 20,
 
 
     'ckpt_save_path': "111022533_hw2/ckpt/checkpoint0.h5",
-    # 'ckpt_load_path': "111022533_hw2/ckpt/checkpoint1.h5"
+    # 'ckpt_load_path': "111022533_hw2/ckpt/eval_1420000.h5"
 })
 
 
 
-
-# para = AttrDict({
-#     'action_num': len(COMPLEX_MOVEMENT), 
-#     'img_shape': (120, 128, 3),
-#     'k': 4,
-#     'frame_shape': (120, 128, 1),
  
-    
-#     'step_num': 1000000,
-#     'discount_factor': 0.99,
-#     'eps_begin': 1.0,
-#     'eps_end': 0.1, 
-#     'buf_size': 5000, 
-
-#     'batch_size': 32,
-#     'lr': 2.5e-4,
-       
-
-#     'replay_start_size': 200,
-#     'learning_period': 4,
-#     'target_update_period': 5,
-#     'save_period': 50, 
-#     'log_period': 1,
-
-
-#     'ckpt_save_path': "111022533_hw2/ckpt/checkpoint3.h5",
-#     # 'ckpt_load_path': "111022533_hw2/ckpt/checkpoint2.h5"
-# })
-
 
  
-class EnvWrapper:
 
+class FrameSkipEnv:
+# class EnvWrapper: 
     def __init__(self, env):   
         self.env = env 
         self.skip = para.skip
-        self.episode = 0
-        self.step = 0
+        # self.episode = 0
+        # self.t = 0
 
     def step(self, action):
         """
@@ -110,13 +87,13 @@ class EnvWrapper:
         - clip reward between -1, 1.
         - return if encounter done before 4 steps.
         """        
-        self.step += 1
+        # self.t += 1
 
         cum_reward = 0
 
         for i in range(self.skip):
         
-            obs_next, reward, done, info = env.step(action)  
+            obs_next, reward, done, info = self.env.step(action)  
             cum_reward += reward
 
             if done: break
@@ -125,16 +102,62 @@ class EnvWrapper:
         return obs_next, cum_reward, done, info
  
     def reset(self):
-        self.step = 0
-        self.episode += 1
+        # self.t = 0
+        # self.episode += 1
         return self.env.reset()
+
+
+
+
+class EpisodicLifeEnv():
+    def __init__(self, env):
+
+        super().__init__() 
+        
+        self.env = env
+        self.prev_lives = 0
+        self.was_real_done = True
+
+        self.episode = 0
+        self.t = 0
+
+    def step(self, action):
+
+        self.t += 1
+
+        obs, reward, done, info = self.env.step(action)
+        self.was_real_done = done
+        lives = info['life'] 
+
+        if lives < self.prev_lives: 
+            done = True
+
+        self.prev_lives = lives
+
+        return obs, reward, done, info
+
+    def reset(self):
+
+        self.t = 0
+        self.episode += 1
+
+        if self.was_real_done:
+            obs = self.env.reset()
+            self.prev_lives = 2
+        else:
+            obs, _, _, info = self.env.step(0)
+            self.prev_lives = info['life']
+        return obs
+
 
 
 
 env = gym_super_mario_bros.make('SuperMarioBros-v0')
 env = JoypadSpace(env, COMPLEX_MOVEMENT)
  
-env_wrapper =  EnvWrapper(env)
+# env =  EnvWrapper(env)
+env =  FrameSkipEnv(env)
+env =  EpisodicLifeEnv(env)
 
 
 
@@ -192,24 +215,21 @@ class Agent:
         x = tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=1)(x) # (64, 3, 3, 64)
         x = tf.keras.layers.ReLU()(x)
 
-
-        # x = tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=1)(x) # (64, 3, 3, 64)
-        # x = tf.keras.layers.ReLU()(x)
-
-        # x = tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=1)(x) # (64, 3, 3, 64)
-        # x = tf.keras.layers.ReLU()(x)
-
-
-
         x = tf.keras.layers.Flatten()(x)
+
         x = tf.keras.layers.Dense(units=512)(x)
         x = tf.keras.layers.ReLU()(x)
+
+        x = tf.keras.layers.Dense(units=512)(x)
+        x = tf.keras.layers.ReLU()(x)
+        
         Q = tf.keras.layers.Dense(self.para.action_num)(x)
 
         model = tf.keras.Model(name=name, inputs=screen_stack, outputs=Q)
 
         return model
  
+
     def max_Q(self, state):
         output = self.model(state)
         return tf.reduce_max(output, axis=1)
@@ -241,9 +261,7 @@ class Agent:
         self.model.load_weights(path)
 
 
-
     def act(self, obs):
-
 
         def stack_frames(input_frames):
             if(len(input_frames) == 1):
@@ -281,9 +299,6 @@ class Agent:
         else:
             self.i += 1
             return self.prev_action
-
-
-
 
 
 
@@ -377,13 +392,18 @@ class Replay_buffer():
 
 class Logger():
 
-    def __init__(self):
-        self.frame_dir = './img/'
+    # def __init__(self):
+    #     self.frame_dir = './img/'
 
-    def save_frame(self, name, frame):
+    def save_frame(self, dir_name, name, frame):
+
+        
+        if(not os.path.exists(dir_name)):
+            os.mkdir(dir_name)
+
         img = Image.fromarray(frame)
         # img = img.resize((84, 84), Image.BILINEAR)
-        img.save(self.frame_dir + name)    
+        img.save(os.path.join(dir_name, name))    
 
 
 
@@ -395,9 +415,6 @@ class Trainer():
     def __init__(self, para):
 
         self.para = para
-        # self.buf = buf 
-        
-        
         self.buf = Replay_buffer(self, para.buf_size)
 
         # self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.para.lr)
@@ -415,7 +432,7 @@ class Trainer():
 
     def train(self): 
 
-        obs = env_wrapper.reset()
+        obs = env.reset()
  
         with open("log.txt", "w") as f: f.write("")
         with open("cum_rewards.txt", "w") as f: f.write("")
@@ -441,22 +458,18 @@ class Trainer():
                 state = self.buf.stack_frame(frame_idx) # (1, h, w, k)
                 action = self.online_agent.select_action(state)
                  
-            
-            obs_next, reward, done, info = env_wrapper.step(action) 
+            obs_next, reward, done, info = env.step(action) 
             cum_reward += reward
 
-
-            if(env_wrapper.episode % 10 == 0):
-                logger.save_frame(f'episode-{env_wrapper.episode}_step-{env_wrapper.step}.jpeg', obs_next)
-
+            if(env.episode % para.save_video_period == 0):
+                logger.save_frame(f'img/episode-{env.episode}', f't-{env.t}.jpeg', obs_next)
 
             reward = min(max(reward, -1), 1)
             self.buf.add_effects(frame_idx, action, reward, done)
             
-            
-
             if done:
-                obs_next = env_wrapper.reset()            
+                print('done one episode')
+                obs_next = env.reset()            
                 with open("cum_rewards.txt", "a") as f: f.write(str({'t': t, 'cum_reward': cum_reward})+'\n')
                 cum_reward = 0
               
