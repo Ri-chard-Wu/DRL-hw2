@@ -37,15 +37,15 @@ para = AttrDict({
     'step_num': 10000000,
     'discount_factor': 0.99,
     
-    'eps_begin': 0.1,
-    'eps_end': 0.09,
+    'eps_begin': 0.2,
+    'eps_end': 0.19,
     # 'eps_begin': 0.1,
     # 'eps_end': 0.09, 
 
-    'buf_size': 450000, 
+    'buf_size': 600000, 
 
     'batch_size': 32,
-    'lr': 2.5e-4,
+    'lr': 1.5e-4,
        
 
     # 'replay_start_size': 10000,
@@ -58,12 +58,12 @@ para = AttrDict({
     'eval_period': 5000,
     # 'eval_period': 250,
     
-    'save_video_period': 500,
+    'save_video_period': 1000,
     # 'save_video_period': 20,
 
 
-    'ckpt_save_path': "111022533_hw2/ckpt/checkpoint2.h5",
-    'ckpt_load_path': "111022533_hw2/ckpt/checkpoint1.h5"
+    'ckpt_save_path': "111022533_hw2/ckpt/checkpoint3.h5",
+    'ckpt_load_path': "111022533_hw2/ckpt/checkpoint2.h5"
 })
 
 
@@ -73,7 +73,6 @@ para = AttrDict({
  
 
 class FrameSkipEnv:
-# class EnvWrapper: 
     def __init__(self, env):   
         self.env = env 
         self.skip = para.skip
@@ -339,8 +338,8 @@ class Replay_buffer():
             _start = idx-(para.k-1)
             end = idx+1 # non-inclusive
             start = _start
-            for i in range(_start, end):
-                if self.done[i] > 0.5: start = i
+            for i in range(_start, end-1):
+                if self.done[i] > 0.5: start = i+1
         
             d = para.k - (end - start)
 
@@ -449,7 +448,7 @@ class Trainer():
 
             frame_idx = self.buf.add_frame(obs) 
 
-            eps_cur = para.eps_cur = para.eps_begin + (t / para.step_num) * (para.eps_end - para.eps_begin)
+            eps_cur = para.eps_begin + (t / para.step_num) * (para.eps_end - para.eps_begin)
             
 
             if t < para.replay_start_size or np.random.rand() < eps_cur:
