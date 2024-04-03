@@ -37,33 +37,35 @@ para = AttrDict({
     'step_num': 10000000,
     'discount_factor': 0.99,
     
-    'eps_begin': 0.2,
-    'eps_end': 0.19,
-    # 'eps_begin': 0.1,
-    # 'eps_end': 0.09, 
+    # 'eps_begin': 0.2,
+    # 'eps_end': 0.19,
+    'eps_begin': 1.0,
+    'eps_end': 0.05, 
+    'eps_sched_period': 1000000,
 
     'buf_size': 600000, 
 
-    'batch_size': 32,
-    'lr': 1.5e-4,
+    'batch_size': 128,
+    # 'lr': 2.5e-4,
+    'lr': 0.0001,
        
 
-    # 'replay_start_size': 10000,
-    'replay_start_size': 100,
+    'replay_start_size': 2000,
+    # 'replay_start_size': 100,
 
     'learning_period': 4,
-    'target_update_period': 10000,
+    'target_update_period': 100,
     'save_period': 10000, 
     'log_period': 250,
     'eval_period': 5000,
     # 'eval_period': 250,
     
-    'save_video_period': 1000,
+    'save_video_period': 2000,
     # 'save_video_period': 20,
 
 
-    'ckpt_save_path': "111022533_hw2/ckpt/checkpoint3.h5",
-    'ckpt_load_path': "111022533_hw2/ckpt/checkpoint2.h5"
+    'ckpt_save_path': "111022533_hw2/ckpt/checkpoint0.h5",
+    # 'ckpt_load_path': "111022533_hw2/ckpt/checkpoint2.h5"
 })
 
 
@@ -187,8 +189,7 @@ def preprocess_screen(screen):
     return img
 
 
-
-
+ 
 
 class Agent:
 
@@ -222,28 +223,39 @@ class Agent:
         x = tf.keras.layers.Dense(units=512)(x)
         x = tf.keras.layers.ReLU()(x)
         
-        Q = tf.keras.layers.Dense(self.para.action_num)(x)
+        # x = tf.keras.layers.Dense(units=512)(x)
+        # x = tf.keras.layers.ReLU()(x)
 
-        model = tf.keras.Model(name=name, inputs=screen_stack, outputs=Q)
+        # x = tf.keras.layers.Dense(units=512)(x)
+        # x = tf.keras.layers.ReLU()(x)
+
+        adv = tf.keras.layers.Dense(self.para.action_num)(x)
+        v = tf.keras.layers.Dense(1)(x)
+
+        model = tf.keras.Model(name=name, inputs=screen_stack, outputs=[adv, v])
 
         return model
  
+    def q(self, state):
+        adv, v = self.model(state)
+        q = v + (adv - tf.reduce_mean(adv, axis=1, keepdims=True))
+        return q
 
     def max_Q(self, state):
-        output = self.model(state)
-        return tf.reduce_max(output, axis=1)
+        q = self.q(state) 
+        return tf.reduce_max(q, axis=1)
  
     def max_action(self, state):
-        output = self.model(state)
-        # return tf.reduce_max(output, axis=1)
-        return tf.argmax(output, axis=1)
+        q  = self.q(state) 
+        return tf.argmax(q, axis=1)
 
 
     def select_action(self, state):  
 
         # state = np.expand_dims(state, axis = 0)
-        output = self.model(state)
-        action = tf.argmax(output, axis=1)[0]
+        q = self.q(state)        
+
+        action = tf.argmax(q, axis=1)[0]
         action = int(action.numpy())
 
         return action
@@ -416,8 +428,8 @@ class Trainer():
         self.para = para
         self.buf = Replay_buffer(self, para.buf_size)
 
-        # self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.para.lr)
-        self.optimizer = tf.keras.optimizers.RMSprop(learning_rate=self.para.lr, rho=0.95, epsilon=0.01)
+        self.optimizer = tf.keras.optimizers.Adam(learning_rate=para.lr)
+        # self.optimizer = tf.keras.optimizers.RMSprop(learning_rate=self.para.lr, rho=0.95, epsilon=0.01)
         
         self.online_agent = Agent('online', para) 
         if('ckpt_load_path' in self.para): 
@@ -433,9 +445,9 @@ class Trainer():
 
         obs = env.reset()
  
-        # with open("log.txt", "w") as f: f.write("")
-        # with open("cum_rewards.txt", "w") as f: f.write("")
-        # with open("eval.txt", "w") as f: f.write("")
+        with open("log.txt", "w") as f: f.write("")
+        with open("cum_rewards.txt", "w") as f: f.write("")
+        with open("eval.txt", "w") as f: f.write("")
         
        
 
@@ -448,8 +460,10 @@ class Trainer():
 
             frame_idx = self.buf.add_frame(obs) 
 
-            eps_cur = para.eps_begin + (t / para.step_num) * (para.eps_end - para.eps_begin)
-            
+            if(t < para.eps_sched_period):
+                eps_cur = para.eps_begin + (t / para.eps_sched_period) * (para.eps_end - para.eps_begin)
+            else:
+                eps_cur = para.eps_end
 
             if t < para.replay_start_size or np.random.rand() < eps_cur:
                 action = np.random.choice(self.para.action_num)
@@ -463,7 +477,7 @@ class Trainer():
             if(env.episode % para.save_video_period == 0):
                 logger.save_frame(f'img/episode-{env.episode}', f't-{env.t}.jpeg', obs_next)
 
-            reward = min(max(reward, -1), 1)
+            # reward = min(max(reward, -1), 1)
             self.buf.add_effects(frame_idx, action, reward, done)
             
             if done:
@@ -514,7 +528,7 @@ class Trainer():
     
     def ddqn_tar_q(self, state_next):
         max_action = tf.cast(self.online_agent.max_action(state_next), tf.int32)        
-        Q = self.target_agent.model(state_next) 
+        Q = self.target_agent.q(state_next) 
         index = tf.stack([tf.range(tf.shape(max_action)[0]), max_action], axis=1) 
         tar_Q = tf.gather_nd(Q, index)   
         return tar_Q
@@ -528,7 +542,7 @@ class Trainer():
         tar_Q = self.ddqn_tar_q(state_next) * (1 - terminal)
 
         with tf.GradientTape() as tape:
-            output = self.online_agent.model(state)
+            output = self.online_agent.q(state)
             index = tf.stack([tf.range(tf.shape(action)[0]), action], axis=1)
             Q = tf.gather_nd(output, index)
             losses = tf.square(reward + self.para.discount_factor * tar_Q - Q)
