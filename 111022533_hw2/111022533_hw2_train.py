@@ -13,7 +13,7 @@ from copy import deepcopy
 import os 
 import time
 from PIL import Image
-
+import importlib
 # os.environ['CUDA_VISIBLE_DEVICES']=''
 
 
@@ -39,8 +39,8 @@ para = AttrDict({
     
     # 'eps_begin': 0.2,
     # 'eps_end': 0.19,
-    'eps_begin': 1.0,
-    'eps_end': 0.05, 
+    'eps_begin': 0.01,
+    'eps_end': 0.01, 
     'eps_sched_period': 1000000,
 
     'buf_size': 600000, 
@@ -60,12 +60,12 @@ para = AttrDict({
     'eval_period': 5000,
     # 'eval_period': 250,
     
-    'save_video_period': 2000,
+    'save_video_period': 1000,
     # 'save_video_period': 20,
 
 
-    'ckpt_save_path': "111022533_hw2/ckpt/checkpoint0.h5",
-    # 'ckpt_load_path': "111022533_hw2/ckpt/checkpoint2.h5"
+    'ckpt_save_path': "111022533_hw2/ckpt/checkpoint1.h5",
+    'ckpt_load_path': "111022533_hw2/ckpt/checkpoint0.h5"
 })
 
 
@@ -191,6 +191,7 @@ def preprocess_screen(screen):
 
  
 
+
 class Agent:
 
     def __init__(self, name, para):   
@@ -198,7 +199,7 @@ class Agent:
         self.model = self.build_model(name)
      
         self.skip = para.skip
-        self.i = 0
+        self.i = para.skip
         self.prev_action = 1
         self.recent_frames = []
  
@@ -273,33 +274,20 @@ class Agent:
 
 
     def act(self, obs):
-
-        def stack_frames(input_frames):
-            if(len(input_frames) == 1):
-                state = np.concatenate(input_frames*4, axis=-1)
-            elif(len(input_frames) == 2):
-                state = np.concatenate(input_frames[0:1]*2 + input_frames[1:]*2, axis=-1)
-            elif(len(input_frames) == 3):
-                state = np.concatenate(input_frames + input_frames[2:], axis=-1)
-            else:
-                state = np.concatenate(input_frames[-4:], axis=-1)
-            # print(f'c state.shape: {state.shape}')
-            return state
+ 
 
         if(self.i >= self.skip):
 
-            self.i = 0
+            self.i = 1
 
             if(len(self.recent_frames) >= para.k): self.recent_frames.pop(0)
             self.recent_frames.append(preprocess_screen(obs))
-                        
-
-            if  np.random.rand() < 0.1:
+ 
+            if  np.random.rand() < 0.01:
                 action = np.random.choice(para.action_num)
             else:
-                # state = np.concatenate([preprocess_screen(obs)] * 4, axis=-1)
-                state = stack_frames(self.recent_frames) 
-                state = np.expand_dims(state, axis = 0)  
+                d = len(self.recent_frames)
+                state = np.concatenate([np.zeros_like(self.recent_frames[0])[np.newaxis,...]]*(para.k-d)  + [i[np.newaxis,...] for i in self.recent_frames], axis=3)
                 assert state.shape == (1, para.frame_shape[0], para.frame_shape[1], para.k)            
                 action = self.select_action(state / 255.0)
 
@@ -310,6 +298,9 @@ class Agent:
         else:
             self.i += 1
             return self.prev_action
+
+
+
 
 
 
@@ -445,9 +436,9 @@ class Trainer():
 
         obs = env.reset()
  
-        with open("log.txt", "w") as f: f.write("")
-        with open("cum_rewards.txt", "w") as f: f.write("")
-        with open("eval.txt", "w") as f: f.write("")
+        # with open("log.txt", "w") as f: f.write("")
+        # with open("cum_rewards.txt", "w") as f: f.write("")
+        # with open("eval.txt", "w") as f: f.write("")
         
        
 
@@ -481,11 +472,12 @@ class Trainer():
             self.buf.add_effects(frame_idx, action, reward, done)
             
             if done:
-                print('done one episode')
                 obs_next = env.reset()            
+
+            if env.was_real_done:
                 with open("cum_rewards.txt", "a") as f: f.write(str({'t': t, 'cum_reward': cum_reward})+'\n')
                 cum_reward = 0
-              
+
             obs = obs_next 
 
             if t > para.replay_start_size and t % para.learning_period == 0:
@@ -503,7 +495,7 @@ class Trainer():
 
                 if t % (para.eval_period * para.learning_period) == 0:
                     # print(f'eval cum reward: {self.evaluate()}')
-                    r = self.evaluate()
+                    r = self.evaluate(self.online_agent)
                     with open("eval.txt", "a") as f: f.write(str({'t': t, 'cum_reward': r})+'\n')
                     self.online_agent.save_checkpoint(f"111022533_hw2/ckpt/eval_{t}.h5")
 
@@ -556,7 +548,7 @@ class Trainer():
  
 
 
-    def evaluate(self): 
+    def evaluate(self, agent, n=5, verbose=False): 
 
         print('evaluating...')
 
@@ -566,16 +558,16 @@ class Trainer():
         
         cum_reward = 0 
       
-        n = 5
+        # n = 5
         time_limit = 120
-        for i in range(n):
+        for i in range(1, n+1):
 
             obs = _env.reset()
             start_time = time.time()
                         
             while True: 
 
-                action = self.online_agent.act(obs)
+                action = agent.act(obs)
                 obs, reward, done, _ = _env.step(action)                
                 cum_reward += reward 
 
@@ -584,18 +576,29 @@ class Trainer():
                     print(f"Time limit reached  ")
                     break
 
+
+
                 if done:
                     break
                     
 
+            if verbose:
+                print(f'i: {i}, avg reward: {cum_reward/i}')
+
         _env.close()  
 
         return cum_reward/n
-
-            
+ 
 
 trainer = Trainer(para)
 trainer.train()
+
+
+
+# module = importlib.import_module('111022533_hw2_test')
+# Agent = getattr(module, 'Agent')
+# agent = Agent()
+# trainer.evaluate(agent, 20, True)
 
 
 
