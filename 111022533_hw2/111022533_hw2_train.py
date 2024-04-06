@@ -39,22 +39,22 @@ para = AttrDict({
     
     # 'eps_begin': 0.2,
     # 'eps_end': 0.19,
-    'eps_begin': 0.01,
-    'eps_end': 0.01, 
+    'eps_begin': 0.001,
+    'eps_end': 0.001, 
     'eps_sched_period': 1000000,
 
     'buf_size': 600000, 
 
-    'batch_size': 128,
+    'batch_size': 256,
     # 'lr': 2.5e-4,
-    'lr': 0.000025,
+    'lr': 1e-4,
        
 
     'replay_start_size': 2000,
     # 'replay_start_size': 100,
 
-    'learning_period': 4,
-    'target_update_period': 100,
+    'learning_period': 1,
+    'target_update_period': 50,
     'save_period': 10000, 
     'log_period': 250,
     'eval_period': 5000,
@@ -64,8 +64,8 @@ para = AttrDict({
     # 'save_video_period': 20,
 
 
-    'ckpt_save_path': "111022533_hw2/ckpt/checkpoint2.h5",
-    'ckpt_load_path': "111022533_hw2/ckpt/checkpoint1.h5"
+    'ckpt_save_path': "111022533_hw2/ckpt/checkpoint5.h5",
+    'ckpt_load_path': "111022533_hw2/ckpt/checkpoint4.h5"
 })
 
 
@@ -290,7 +290,31 @@ class Agent_old:
 
 
 
- 
+'''
+
+import tensorflow as tf
+from tensorflow.keras import layers, Sequential, Model
+
+# Define the first Sequential model
+model1 = Sequential([
+    layers.Conv2D(32, kernel_size=(3, 3), activation='relu', input_shape=(28, 28, 1)),
+    layers.MaxPooling2D(pool_size=(2, 2)),
+    layers.Flatten()
+])
+
+# Define the second Sequential model
+model2 = Sequential([
+    layers.Dense(128, activation='relu'),
+    layers.Dense(10, activation='softmax')
+])
+
+# Compose the models into a single Model
+input_layer = layers.Input(shape=(28, 28, 1))
+output_layer = model2(model1(input_layer))  # Connect the output of model1 to the input of model2
+model = Model(inputs=input_layer, outputs=output_layer)
+
+model.summary()
+'''
 
 
 class Agent:
@@ -386,7 +410,7 @@ class Agent:
             if(len(self.recent_frames) >= para.k): self.recent_frames.pop(0)
             self.recent_frames.append(preprocess_screen(obs))
  
-            if  np.random.rand() < 0.01:
+            if  np.random.rand() < 0.001:
                 action = np.random.choice(para.action_num)
             else:
                 d = len(self.recent_frames)
@@ -529,17 +553,23 @@ class Trainer():
         #     self.online_agent.load_checkpoint(self.para.ckpt_load_path)
          
 
-        self.online_agent_old = Agent_old('online', para) 
-        if('ckpt_load_path' in self.para): 
-            self.online_agent_old.load_checkpoint(self.para.ckpt_load_path)
+        # self.online_agent_old = Agent_old('online', para) 
+        # if('ckpt_load_path' in self.para): 
+        #     self.online_agent_old.load_checkpoint(self.para.ckpt_load_path)
          
 
         self.online_agent = Agent('online', para) 
-        to_copy = [1, 3, 5, 8, 10]
-        for i in to_copy:
-            self.online_agent.model.layers[i].set_weights(self.online_agent_old.model.layers[i].get_weights())        
-            self.online_agent.model.layers[i].trainable = False
+        # to_copy = [1, 3, 5, 8, 10]
+        # for i in to_copy:
+        #     self.online_agent.model.layers[i].set_weights(self.online_agent_old.model.layers[i].get_weights())        
+        #     self.online_agent.model.layers[i].trainable = False
+        if('ckpt_load_path' in self.para): 
+            self.online_agent.load_checkpoint(self.para.ckpt_load_path)
 
+        # for layer in self.online_agent.model.layers:
+        #     print(f'layer.trainable: {layer.trainable}')
+        
+        # exit()
 
         self.target_agent = Agent('target', para) 
         self.target_agent.model.set_weights(self.online_agent.model.get_weights())
@@ -583,6 +613,7 @@ class Trainer():
                 logger.save_frame(f'img/episode-{env.episode}', f't-{env.t}.jpeg', obs_next)
 
             # reward = min(max(reward, -1), 1)
+            reward = np.sign(reward) * (np.sqrt(abs(reward) + 1) - 1) + 0.001 * reward
             self.buf.add_effects(frame_idx, action, reward, done)
             
             if done:
