@@ -39,13 +39,13 @@ para = AttrDict({
     
     # 'eps_begin': 0.2,
     # 'eps_end': 0.19,
-    'eps_begin': 0.001,
-    'eps_end': 0.001, 
-    'eps_sched_period': 1000000,
+    'eps_begin': 1.0,
+    'eps_end': 0.01, 
+    'eps_sched_period': 300000,
 
     'buf_size': 600000, 
 
-    'batch_size': 256,
+    'batch_size': 128,
     # 'lr': 2.5e-4,
     'lr': 1e-4,
        
@@ -53,8 +53,8 @@ para = AttrDict({
     'replay_start_size': 2000,
     # 'replay_start_size': 100,
 
-    'learning_period': 1,
-    'target_update_period': 50,
+    'learning_period': 4,
+    'target_update_period': 100,
     'save_period': 10000, 
     'log_period': 250,
     'eval_period': 5000,
@@ -64,8 +64,8 @@ para = AttrDict({
     # 'save_video_period': 20,
 
 
-    'ckpt_save_path': "111022533_hw2/ckpt/checkpoint5.h5",
-    'ckpt_load_path': "111022533_hw2/ckpt/checkpoint4.h5"
+    'ckpt_save_path': "111022533_hw2/ckpt/checkpoint1.h5",
+    'ckpt_load_path': "111022533_hw2/ckpt/checkpoint0.h5"
 })
 
 
@@ -182,111 +182,6 @@ def preprocess_screen(screen):
  
 
 
-class Agent_old:
-
-    def __init__(self, name, para):   
-        self.para = para 
-        self.model = self.build_model(name)
-     
-        self.skip = para.skip
-        self.i = para.skip
-        self.prev_action = 1
-        self.recent_frames = []
- 
-    def build_model(self, name):
-        # input: state
-        # output: each action's Q-value
-        input_shape = [self.para.img_shape[0], self.para.img_shape[1], self.para.k]
-        screen_stack = tf.keras.Input(shape=input_shape, dtype=tf.float32)
-
-        x = tf.keras.layers.Conv2D(filters=32, kernel_size=8, strides=4)(screen_stack) # (4, 8, 8, 32)
-        x = tf.keras.layers.ReLU()(x)
-        x = tf.keras.layers.Conv2D(filters=64, kernel_size=4, strides=2)(x) # (32, 4, 4, 64)
-        x = tf.keras.layers.ReLU()(x)
-        x = tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=1)(x) # (64, 3, 3, 64)
-        x = tf.keras.layers.ReLU()(x)
-
-        x = tf.keras.layers.Flatten()(x)
-
-        x = tf.keras.layers.Dense(units=512)(x)
-        x = tf.keras.layers.ReLU()(x)
-
-        x = tf.keras.layers.Dense(units=512)(x)
-        x = tf.keras.layers.ReLU()(x)
-
-        adv = tf.keras.layers.Dense(self.para.action_num)(x)
-        v = tf.keras.layers.Dense(1)(x)
-
-        model = tf.keras.Model(name=name, inputs=screen_stack, outputs=[adv, v])
-
-        return model
- 
-  
-
-    def q(self, state):
-        adv, v = self.model(state)
-        q = v + (adv - tf.reduce_mean(adv, axis=1, keepdims=True))
-        return q
-
-    def max_Q(self, state):
-        q = self.q(state) 
-        return tf.reduce_max(q, axis=1)
- 
-    def max_action(self, state):
-        q  = self.q(state) 
-        return tf.argmax(q, axis=1)
-
-
-    def select_action(self, state):  
-
-        # state = np.expand_dims(state, axis = 0)
-        q = self.q(state)        
-
-        action = tf.argmax(q, axis=1)[0]
-        action = int(action.numpy())
-
-        return action
-
-    def save_checkpoint(self, path):  
-        print(f'- saved ckpt {path}') 
-        self.model.save_weights(path)
-         
-    def load_checkpoint(self, path): 
-        # need call once to enable load weights.
-        print(f'- loaded ckpt {path}') 
-        self.model(tf.random.uniform(shape=[1, self.para.img_shape[0], self.para.img_shape[1], 
-                                                        self.para.k]))
-        self.model.load_weights(path)
-
-
-    def act(self, obs):
- 
-
-        if(self.i >= self.skip):
-
-            self.i = 1
-
-            if(len(self.recent_frames) >= para.k): self.recent_frames.pop(0)
-            self.recent_frames.append(preprocess_screen(obs))
- 
-            if  np.random.rand() < 0.01:
-                action = np.random.choice(para.action_num)
-            else:
-                d = len(self.recent_frames)
-                state = np.concatenate([np.zeros_like(self.recent_frames[0])[np.newaxis,...]]*(para.k-d)  + [i[np.newaxis,...] for i in self.recent_frames], axis=3)
-                assert state.shape == (1, para.frame_shape[0], para.frame_shape[1], para.k)            
-                action = self.select_action(state / 255.0)
-
-            self.prev_action = action
-
-            return action
-
-        else:
-            self.i += 1
-            return self.prev_action
-
-
-
 
 
 
@@ -317,6 +212,73 @@ model.summary()
 '''
 
 
+
+
+def sample_noise(shape):
+    noise = tf.random.normal(shape)
+    return noise
+
+
+class NoisyLayer(tf.keras.layers.Layer):
+
+    def __init__(self, units):
+ 
+        self.units = units
+        super(NoisyLayer, self).__init__()
+
+
+    def build(self, input_shape):
+
+        self.input_dim = input_shape[-1]
+
+        mu_init = tf.random_uniform_initializer(minval=-1*1/np.power(self.input_dim, 0.5),
+                                                      maxval=1*1/np.power(self.input_dim, 0.5))
+        sigma_init = tf.constant_initializer(0.4/np.power(self.input_dim, 0.5))
+
+        self.w_mu = self.add_weight(shape=(self.input_dim, self.units),
+                                             initializer=mu_init,
+                                             trainable=True,
+                                             name='w_mu')
+        self.w_sigma = self.add_weight(shape=(self.input_dim, self.units),
+                                             initializer=sigma_init,
+                                             trainable=True,
+                                             name='w_sigma')
+
+
+        self.b_mu = self.add_weight(shape=(self.units,),
+                                             initializer=mu_init,
+                                             trainable=True,
+                                             name='b_mu')
+        self.b_sigma = self.add_weight(shape=(self.units,),
+                                           initializer=sigma_init,
+                                           trainable=True,
+                                           name='b_sigma')
+
+
+        super(NoisyLayer, self).build(input_shape)
+
+        # self.kernel = None
+        # self.bias = None
+
+    def call(self, inputs):
+
+        def f(x):
+            return tf.multiply(tf.sign(x), tf.pow(tf.abs(x), 0.5))
+
+        f_p = f(sample_noise([self.input_dim, 1]))
+        f_q = f(sample_noise([1, self.units]))
+
+
+        w_epsilon = f_p * f_q; # (dim_in, dim_out)
+        b_epsilon = tf.squeeze(f_q) # (dim_out, )
+
+        w = self.w_mu + tf.multiply(self.w_sigma, w_epsilon)
+        b = self.b_mu + tf.multiply(self.b_sigma, b_epsilon)
+        return tf.matmul(inputs, w) + b
+
+
+
+
 class Agent:
 
     def __init__(self, name, para):   
@@ -328,18 +290,44 @@ class Agent:
         self.prev_action = 1
         self.recent_frames = []
  
+
+
+                    
     def build_model(self, name):
         # input: state
         # output: each action's Q-value
+  
         input_shape = [self.para.img_shape[0], self.para.img_shape[1], self.para.k]
         screen_stack = tf.keras.Input(shape=input_shape, dtype=tf.float32)
 
-        x = tf.keras.layers.Conv2D(filters=32, kernel_size=8, strides=4)(screen_stack) # (4, 8, 8, 32)
+
+        # x = tf.keras.layers.Conv2D(filters=32, kernel_size=4, strides=4)(screen_stack) # (4, 8, 8, 32)
+        # x = tf.keras.layers.ReLU()(x)
+        # x = tf.keras.layers.Conv2D(filters=64, kernel_size=2, strides=2)(x) # (32, 4, 4, 64)
+        # x = tf.keras.layers.ReLU()(x)
+        # x = tf.keras.layers.Conv2D(filters=64, kernel_size=2, strides=1)(x) # (64, 3, 3, 64)
+        # x = tf.keras.layers.ReLU()(x)
+        
+
+        # x = tf.keras.layers.Flatten()(x)
+
+        # x = tf.keras.layers.Dense(units=496)(x)
+        # x = tf.keras.layers.ReLU()(x)
+
+
+        # adv = tf.keras.layers.Dense(self.para.action_num)(x)
+        # v = tf.keras.layers.Dense(1)(x)
+
+        # model = tf.keras.Model(name=name, inputs=screen_stack, outputs=[adv, v])
+
+ 
+        x = tf.keras.layers.Conv2D(filters=32, kernel_size=4, strides=4)(screen_stack) # (4, 8, 8, 32)
         x = tf.keras.layers.ReLU()(x)
-        x = tf.keras.layers.Conv2D(filters=64, kernel_size=4, strides=2)(x) # (32, 4, 4, 64)
+        x = tf.keras.layers.Conv2D(filters=64, kernel_size=2, strides=2)(x) # (32, 4, 4, 64)
         x = tf.keras.layers.ReLU()(x)
-        x = tf.keras.layers.Conv2D(filters=64, kernel_size=3, strides=1)(x) # (64, 3, 3, 64)
-        x = tf.keras.layers.ReLU()(x)
+        x = tf.keras.layers.Conv2D(filters=128, kernel_size=2, strides=1)(x) # (64, 3, 3, 64)
+
+        x = tf.keras.layers.MaxPool2D(pool_size=(2, 2))(x)
 
         x = tf.keras.layers.Flatten()(x)
 
@@ -349,17 +337,29 @@ class Agent:
         x = tf.keras.layers.Dense(units=512)(x)
         x = tf.keras.layers.ReLU()(x)
 
-        x = tf.keras.layers.Dense(units=512)(x)
-        x = tf.keras.layers.ReLU()(x)
+        x1 = NoisyLayer(512)(x)
+        x1 = tf.keras.layers.ReLU()(x1)
+        adv = NoisyLayer(12)(x1)
 
-        x = tf.keras.layers.Dense(units=512)(x)
-        x = tf.keras.layers.ReLU()(x)
 
-        adv = tf.keras.layers.Dense(self.para.action_num)(x)
-        v = tf.keras.layers.Dense(1)(x)
+        x2 = NoisyLayer(512)(x)
+        x2 = tf.keras.layers.ReLU()(x2)
+        v = NoisyLayer(1)(x2)
 
-        model = tf.keras.Model(name=name, inputs=screen_stack, outputs=[adv, v])
+        model = tf.keras.Model(inputs=screen_stack, outputs=[adv, v])
+        
 
+
+        # for layer in model.layers:        
+        #     if 'Conv2D' in str(type(layer)):
+        #         n = layer.weights[1].shape[0]
+        #         layer.bias.assign(tf.ones((n))*0.01) 
+                
+        # for layer in model.layers:
+        #     if 'Conv2D' in str(type(layer)):
+        #         print(layer.weights[1])
+
+        
         return model
  
   
@@ -417,6 +417,11 @@ class Agent:
                 state = np.concatenate([np.zeros_like(self.recent_frames[0])[np.newaxis,...]]*(para.k-d)  + [i[np.newaxis,...] for i in self.recent_frames], axis=3)
                 assert state.shape == (1, para.frame_shape[0], para.frame_shape[1], para.k)            
                 action = self.select_action(state / 255.0)
+
+            # d = len(self.recent_frames)
+            # state = np.concatenate([np.zeros_like(self.recent_frames[0])[np.newaxis,...]]*(para.k-d)  + [i[np.newaxis,...] for i in self.recent_frames], axis=3)
+            # assert state.shape == (1, para.frame_shape[0], para.frame_shape[1], para.k)            
+            # action = self.select_action(state / 255.0)
 
             self.prev_action = action
 
@@ -546,30 +551,11 @@ class Trainer():
         self.buf = Replay_buffer(self, para.buf_size)
 
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=para.lr)
-        # self.optimizer = tf.keras.optimizers.RMSprop(learning_rate=self.para.lr, rho=0.95, epsilon=0.01)
-        
-        # self.online_agent = Agent('online', para) 
-        # if('ckpt_load_path' in self.para): 
-        #     self.online_agent.load_checkpoint(self.para.ckpt_load_path)
-         
-
-        # self.online_agent_old = Agent_old('online', para) 
-        # if('ckpt_load_path' in self.para): 
-        #     self.online_agent_old.load_checkpoint(self.para.ckpt_load_path)
-         
+     
 
         self.online_agent = Agent('online', para) 
-        # to_copy = [1, 3, 5, 8, 10]
-        # for i in to_copy:
-        #     self.online_agent.model.layers[i].set_weights(self.online_agent_old.model.layers[i].get_weights())        
-        #     self.online_agent.model.layers[i].trainable = False
         if('ckpt_load_path' in self.para): 
             self.online_agent.load_checkpoint(self.para.ckpt_load_path)
-
-        # for layer in self.online_agent.model.layers:
-        #     print(f'layer.trainable: {layer.trainable}')
-        
-        # exit()
 
         self.target_agent = Agent('target', para) 
         self.target_agent.model.set_weights(self.online_agent.model.get_weights())
@@ -605,7 +591,10 @@ class Trainer():
             else:
                 state = self.buf.stack_frame(frame_idx) # (1, h, w, k)
                 action = self.online_agent.select_action(state)
-                 
+
+            # state = self.buf.stack_frame(frame_idx) # (1, h, w, k)
+            # action = self.online_agent.select_action(state)
+                                
             obs_next, reward, done, info = env.step(action) 
             cum_reward += reward
 
@@ -613,7 +602,7 @@ class Trainer():
                 logger.save_frame(f'img/episode-{env.episode}', f't-{env.t}.jpeg', obs_next)
 
             # reward = min(max(reward, -1), 1)
-            reward = np.sign(reward) * (np.sqrt(abs(reward) + 1) - 1) + 0.001 * reward
+            # reward = np.sign(reward) * (np.sqrt(abs(reward) + 1) - 1) + 0.001 * reward
             self.buf.add_effects(frame_idx, action, reward, done)
             
             if done:
